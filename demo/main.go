@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/allank/murli"
+	murliCobra "github.com/allank/murli/cobra"
 	"github.com/spf13/cobra"
 )
 
@@ -17,17 +18,15 @@ var queryCmd = &cobra.Command{
 	Short: "Semantic query search",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		writer := murli.NewWriter(cmd)
+		writer := murliCobra.NewWriter(cmd)
 		queryText := args[0]
 
-		// Log progress to demonstrate token-efficient collapsing
 		writer.Progress("Searching similarity index...")
-		writer.Progress("Searching similarity index...") // Repeated
-		writer.Progress("Searching similarity index...") // Repeated
+		writer.Progress("Searching similarity index...")
+		writer.Progress("Searching similarity index...")
 		writer.Progress("Reranking search candidates...")
-		writer.Progress("Reranking search candidates...") // Repeated
+		writer.Progress("Reranking search candidates...")
 
-		// Trigger various error scenarios for manual testing
 		if queryText == "error" {
 			return fmt.Errorf("simulated backend storage timeout")
 		}
@@ -47,7 +46,6 @@ var queryCmd = &cobra.Command{
 			{Path: "/users/allank/docs/cabinetry", Score: 0.81},
 		}
 
-		// Emit output dynamically
 		writer.WriteSuccess(
 			fmt.Sprintf("Found %d matching folders", len(results)),
 			results,
@@ -64,22 +62,17 @@ var rootCmd = &cobra.Command{
 func main() {
 	rootCmd.AddCommand(queryCmd)
 
-	// Configure flags
 	queryCmd.Flags().Int("top", 5, "Maximum number of results to return")
 	queryCmd.Flags().String("index", "", "Path to index root (auto-discovered if empty)")
 
-	// Annotate leaf command
-	murli.Annotate(queryCmd, murli.Metadata{
-		AgentDescription: "Searches vector database for semantic directory matches. Performs cosine similarity searches across the directory summary index.",
-		WhenToUse:        "Use when you need to locate folders containing specific conceptual topics. Do NOT use if you need precise word-matching.",
+	murliCobra.Annotate(queryCmd, murli.Metadata{
+		AgentDescription: "Searches vector database for semantic directory matches.",
+		WhenToUse:        "Use when you need to locate folders containing specific conceptual topics.",
 		Idempotent:       true,
 		Returns: &murli.ReturnSchema{
 			Type:        "json",
 			Description: "Cosine similarity results ranked by score",
-			Shape: map[string]any{
-				"path":  "string",
-				"score": "float32",
-			},
+			Shape:       map[string]any{"path": "string", "score": "float32"},
 		},
 		Examples: []string{
 			"riffle query 'rust database drivers'",
@@ -87,6 +80,5 @@ func main() {
 		},
 	})
 
-	// Execute using murli
-	_ = murli.Execute(rootCmd)
+	_ = murliCobra.Execute(rootCmd)
 }
