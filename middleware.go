@@ -94,6 +94,9 @@ func wrapCommands(cmd *cobra.Command) {
 
 		// Intercept execution errors
 		if runErr != nil {
+			if w.IsTTY() {
+				return runErr
+			}
 			if agentErr, ok := runErr.(*AgentError); ok {
 				w.WriteError(agentErr)
 			} else {
