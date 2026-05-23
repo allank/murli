@@ -273,7 +273,7 @@ func TestLogDeduplication(t *testing.T) {
 		l.Flush()
 
 		got := buf.String()
-		want := "Loading config (repeated 1 times progress)\nConnecting db\n"
+		want := "Loading config (repeated 1 time, progress)\nConnecting db\n"
 		if got != want {
 			t.Errorf("expected %q, got %q", want, got)
 		}

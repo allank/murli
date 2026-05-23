@@ -218,4 +218,4 @@ go test -v ./...
 
 ## 📄 License
 
-Distributed under the MIT License. See [spec.md](spec.md) for architecture definitions.
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.

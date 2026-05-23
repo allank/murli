@@ -1,0 +1,23 @@
+# Binaries
+/riffle
+/demo/riffle
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# IDE and tool session files
+.antigravitycli/
+.claude/
+
+# Go workspace file
+go.work
+go.work.sum

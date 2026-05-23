@@ -73,10 +73,14 @@ func (l *Logger) Flush() {
 	}
 
 	if l.dupCount > 0 {
+		noun := "times"
+		if l.dupCount == 1 {
+			noun = "time"
+		}
 		if l.isProgress {
-			fmt.Fprintf(l.writer, "%s (repeated %d times progress)\n", l.lastLine, l.dupCount)
+			fmt.Fprintf(l.writer, "%s (repeated %d %s, progress)\n", l.lastLine, l.dupCount, noun)
 		} else {
-			fmt.Fprintf(l.writer, "%s (repeated %d times)\n", l.lastLine, l.dupCount)
+			fmt.Fprintf(l.writer, "%s (repeated %d %s)\n", l.lastLine, l.dupCount, noun)
 		}
 	} else {
 		fmt.Fprintln(l.writer, l.lastLine)
