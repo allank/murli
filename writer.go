@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-
-	"github.com/spf13/cobra"
 )
 
 // Writer handles dynamic output routing based on terminal presence and agent flags.
@@ -18,47 +16,41 @@ type Writer struct {
 	logger *Logger
 }
 
-// NewWriter returns a configured output writer for the current execution context.
-func NewWriter(cmd *cobra.Command) *Writer {
-	forceAgent, _ := cmd.Flags().GetBool("agent")
-
-	stdout := cmd.OutOrStdout()
-	stderr := cmd.ErrOrStderr()
-
-	// Pure-Go, zero-dependency TTY check
-	stdoutIsTTY := isTerminal(stdout)
-
+// NewWriter returns a configured output writer.
+// Set agentMode true to force JSON output regardless of TTY state.
+func NewWriter(stdout, stderr io.Writer, agentMode bool) *Writer {
+	isTTY := isTerminal(stdout) && !agentMode
 	w := &Writer{
 		stdout: stdout,
 		stderr: stderr,
-		isTTY:  stdoutIsTTY && !forceAgent,
-		force:  forceAgent,
+		isTTY:  isTTY,
+		force:  agentMode,
 	}
 	w.logger = NewLogger(stderr, w.isTTY)
 	return w
 }
 
-// IsTTY returns true if the writer is in TTY (Human Pretty) mode.
+// IsTTY returns true if the writer is in human (TTY) mode.
 func (w *Writer) IsTTY() bool {
 	return w.isTTY
 }
 
-// Log writes a message to the logging stream, leveraging deduplication.
+// Log writes a message to stderr, deduplicating consecutive duplicates in agent mode.
 func (w *Writer) Log(msg string) {
 	w.logger.Log(msg)
 }
 
-// Progress writes a progress update, using overwrites in TTY and token collapsing in Agent mode.
+// Progress writes a progress update; overwrites current line in TTY, collapses in agent mode.
 func (w *Writer) Progress(msg string) {
 	w.logger.LogProgress(msg)
 }
 
-// Flush flushes any deferred duplicate logs.
+// Flush flushes any deferred deduplicated logs.
 func (w *Writer) Flush() {
 	w.logger.Flush()
 }
 
-// WriteSuccess writes standard output. If in TTY mode, writes human text; otherwise writes structured JSON.
+// WriteSuccess writes to stdout. TTY mode writes humanText; agent mode writes structured JSON.
 func (w *Writer) WriteSuccess(humanText string, jsonPayload any) {
 	if w.isTTY {
 		fmt.Fprintln(w.stdout, humanText)
