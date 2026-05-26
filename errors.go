@@ -6,24 +6,42 @@ import (
 	"os"
 )
 
-// Exit codes mapping to standard Agent actions
+// Exit codes 0–3: table-stakes (present since v0.1).
 const (
-	ExitOK        = 0 // Successful execution
-	ExitUserError = 1 // Bad input or argument configuration
-	ExitToolError = 2 // Environment, network, or filesystem crash
+	ExitOK        = 0 // Success
+	ExitUserError = 1 // Bad input or arguments
+	ExitToolError = 2 // Environment/internal failure
 	ExitPartial   = 3 // Some operations succeeded, some failed
 )
 
-// ExitFunc is a package-level variable to enable clean mock testing of os.Exit.
+// Exit codes 4–9: extended taxonomy (v0.2).
+const (
+	ExitTimeout     = 4 // Operation timed out; retry may succeed
+	ExitNotFound    = 5 // Requested resource does not exist
+	ExitPermission  = 6 // Caller lacks permission; not retryable without auth change
+	ExitConflict    = 7 // State conflict (e.g. resource already exists)
+	ExitRateLimited = 8 // Rate limit hit; retry after RetryAfterMs
+	ExitCancelled   = 9 // Operation cancelled by signal or context
+)
+
+// ExitFunc is swapped out in tests to capture exit codes without terminating.
 var ExitFunc = os.Exit
 
-// AgentError represents a structured error returned to an LLM-based agent.
+// AgentError is the structured error envelope written to stderr.
+// Fields are serialised as JSON in agent mode; SchemaVersion and ToolVersion
+// are auto-populated by WriteError — do not set them manually.
 type AgentError struct {
-	Code        int    `json:"code"`
-	ErrorType   string `json:"error"`
-	Message     string `json:"message"`
-	Suggestion  string `json:"suggestion,omitempty"`
-	Recoverable bool   `json:"recoverable"`
+	Code          int      `json:"code"`
+	ErrorType     string   `json:"error"`
+	Message       string   `json:"message"`
+	Suggestion    string   `json:"suggestion,omitempty"`
+	Recoverable   bool     `json:"recoverable"`
+	ValidValues   []string `json:"valid_values,omitempty"`
+	RetryAfterMs  int      `json:"retry_after_ms,omitempty"`
+	DocURL        string   `json:"doc_url,omitempty"`
+	Field         string   `json:"field,omitempty"`
+	SchemaVersion string   `json:"schema_version,omitempty"`
+	ToolVersion   string   `json:"tool_version,omitempty"`
 }
 
 // Error implements the standard Go error interface.
@@ -31,7 +49,31 @@ func (e *AgentError) Error() string {
 	return e.Message
 }
 
-// WriteError writes the structured error to stderr and exits with the defined exit code.
+// NewUserError returns a recoverable AgentError for bad input.
+// Use when the caller supplied invalid arguments or configuration.
+func NewUserError(message, suggestion string) *AgentError {
+	return &AgentError{
+		Code:        ExitUserError,
+		ErrorType:   "user_error",
+		Message:     message,
+		Suggestion:  suggestion,
+		Recoverable: true,
+	}
+}
+
+// NewToolError returns a non-recoverable AgentError for internal/environment failures.
+// Use when the fault is in the environment (network, filesystem, dependency) not the caller.
+func NewToolError(message string) *AgentError {
+	return &AgentError{
+		Code:        ExitToolError,
+		ErrorType:   "tool_error",
+		Message:     message,
+		Recoverable: false,
+	}
+}
+
+// WriteError writes the structured error to stderr and exits with the error's exit code.
+// In TTY mode: human-readable. In agent mode: JSON envelope with schema_version and tool_version.
 func (w *Writer) WriteError(err *AgentError) {
 	if w.isTTY {
 		fmt.Fprintf(w.stderr, "Error: %s\n", err.Message)
@@ -39,10 +81,19 @@ func (w *Writer) WriteError(err *AgentError) {
 			fmt.Fprintf(w.stderr, "Hint:  %s\n", err.Suggestion)
 		}
 	} else {
+		toWrite := *err // copy so we don't mutate the caller's struct
+		toWrite.SchemaVersion = SchemaVersion
+		toWrite.ToolVersion = ToolVersion
 		enc := json.NewEncoder(w.stderr)
 		enc.SetIndent("", "  ")
 		enc.SetEscapeHTML(false)
-		_ = enc.Encode(err)
+		_ = enc.Encode(&toWrite)
 	}
 	ExitFunc(err.Code)
 }
+
+// Temporary placeholders — SchemaVersion and ToolVersion will be moved to
+// version.go in Task 3. Remove these two lines when version.go is created.
+const SchemaVersion = "0.2"
+
+var ToolVersion = ""

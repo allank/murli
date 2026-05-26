@@ -118,6 +118,62 @@ func TestErrorWriter(t *testing.T) {
 	})
 }
 
+func TestExtendedExitCodes(t *testing.T) {
+	if ExitTimeout != 4 {
+		t.Errorf("ExitTimeout: want 4, got %d", ExitTimeout)
+	}
+	if ExitNotFound != 5 {
+		t.Errorf("ExitNotFound: want 5, got %d", ExitNotFound)
+	}
+	if ExitPermission != 6 {
+		t.Errorf("ExitPermission: want 6, got %d", ExitPermission)
+	}
+	if ExitConflict != 7 {
+		t.Errorf("ExitConflict: want 7, got %d", ExitConflict)
+	}
+	if ExitRateLimited != 8 {
+		t.Errorf("ExitRateLimited: want 8, got %d", ExitRateLimited)
+	}
+	if ExitCancelled != 9 {
+		t.Errorf("ExitCancelled: want 9, got %d", ExitCancelled)
+	}
+}
+
+func TestNewUserError(t *testing.T) {
+	err := NewUserError("invalid value", "provide a number between 1 and 10")
+	if err.Code != ExitUserError {
+		t.Errorf("Code: want %d, got %d", ExitUserError, err.Code)
+	}
+	if err.Message != "invalid value" {
+		t.Errorf("Message: want %q, got %q", "invalid value", err.Message)
+	}
+	if err.Suggestion != "provide a number between 1 and 10" {
+		t.Errorf("Suggestion: want %q, got %q", "provide a number between 1 and 10", err.Suggestion)
+	}
+	if !err.Recoverable {
+		t.Error("NewUserError must be Recoverable = true")
+	}
+	if err.ErrorType == "" {
+		t.Error("NewUserError must set ErrorType")
+	}
+}
+
+func TestNewToolError(t *testing.T) {
+	err := NewToolError("database connection refused")
+	if err.Code != ExitToolError {
+		t.Errorf("Code: want %d, got %d", ExitToolError, err.Code)
+	}
+	if err.Message != "database connection refused" {
+		t.Errorf("Message: want %q, got %q", "database connection refused", err.Message)
+	}
+	if err.Recoverable {
+		t.Error("NewToolError must be Recoverable = false")
+	}
+	if err.ErrorType == "" {
+		t.Error("NewToolError must set ErrorType")
+	}
+}
+
 // TestLogDeduplication validates logging collapsing and overwriting.
 func TestLogDeduplication(t *testing.T) {
 	t.Run("TTY mode overwrites", func(t *testing.T) {
