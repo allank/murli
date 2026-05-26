@@ -74,9 +74,9 @@ func main() {
 			Description: "Cosine similarity results ranked by score",
 			Shape:       map[string]any{"path": "string", "score": "float32"},
 		},
-		Examples: []string{
-			"riffle query 'rust database drivers'",
-			"riffle query 'woodworking projects' --top 3",
+		Examples: []murli.Example{
+			{Command: "riffle query 'rust database drivers'"},
+			{Command: "riffle query 'woodworking projects' --top 3"},
 		},
 	})
 

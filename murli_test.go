@@ -507,6 +507,163 @@ func TestWriteProgressTTYMode(t *testing.T) {
 	}
 }
 
+func TestExampleType(t *testing.T) {
+	ex := Example{
+		Command:          "riffle query woodworking",
+		Description:      "Find folders matching the woodworking topic",
+		ExpectedExitCode: 0,
+	}
+	data, err := json.Marshal(ex)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(data, &got)
+	if got["command"] != "riffle query woodworking" {
+		t.Errorf("command: %v", got["command"])
+	}
+	if got["description"] != "Find folders matching the woodworking topic" {
+		t.Errorf("description: %v", got["description"])
+	}
+	// expected_exit_code 0 is omitted (omitempty)
+	if _, present := got["expected_exit_code"]; present {
+		t.Errorf("expected_exit_code should be omitted when zero")
+	}
+}
+
+func TestFlagAnnotationType(t *testing.T) {
+	ann := FlagAnnotation{
+		Env:                   "RIFFLE_TOP",
+		Sensitive:             false,
+		Persistent:            true,
+		MutuallyExclusiveWith: []string{"all"},
+		Enum:                  []string{"5", "10", "20"},
+		Pattern:               `^\d+$`,
+	}
+	data, err := json.Marshal(ann)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(data, &got)
+	if got["env"] != "RIFFLE_TOP" {
+		t.Errorf("env: %v", got["env"])
+	}
+	if got["persistent"] != true {
+		t.Errorf("persistent: %v", got["persistent"])
+	}
+	enums, ok := got["enum"].([]any)
+	if !ok || len(enums) != 3 {
+		t.Errorf("enum: %v", got["enum"])
+	}
+}
+
+func TestApplyFlagAnnotation(t *testing.T) {
+	fs := FlagSchema{Name: "top", Type: "int", Default: 5, Description: "Max results"}
+	ann := FlagAnnotation{
+		Env:                   "RIFFLE_TOP",
+		Persistent:            true,
+		MutuallyExclusiveWith: []string{"all"},
+		Enum:                  []string{"5", "10"},
+		Pattern:               `^\d+$`,
+	}
+	ApplyFlagAnnotation(&fs, ann)
+	if fs.Env != "RIFFLE_TOP" {
+		t.Errorf("Env: %q", fs.Env)
+	}
+	if !fs.Persistent {
+		t.Error("Persistent should be true")
+	}
+	if len(fs.MutuallyExclusiveWith) != 1 || fs.MutuallyExclusiveWith[0] != "all" {
+		t.Errorf("MutuallyExclusiveWith: %v", fs.MutuallyExclusiveWith)
+	}
+	if len(fs.Enum) != 2 {
+		t.Errorf("Enum: %v", fs.Enum)
+	}
+	if fs.Pattern != `^\d+$` {
+		t.Errorf("Pattern: %q", fs.Pattern)
+	}
+}
+
+func TestApplyFlagAnnotationDeepCopy(t *testing.T) {
+	fs := FlagSchema{Name: "x"}
+	enum := []string{"a", "b"}
+	ann := FlagAnnotation{Enum: enum}
+	ApplyFlagAnnotation(&fs, ann)
+	// Mutate original — must not affect fs.Enum
+	enum[0] = "CHANGED"
+	if fs.Enum[0] != "a" {
+		t.Errorf("Enum deep copy violated: fs.Enum[0] = %q", fs.Enum[0])
+	}
+}
+
+func TestDescribeOutputTypes(t *testing.T) {
+	out := DescribeOutput{
+		Name:          "riffle",
+		Summary:       "Riffle semantic search",
+		SchemaVersion: "0.2",
+		Capabilities: Capabilities{
+			Streaming:     true,
+			DryRun:        false,
+			OutputFormats: []string{"json", "ndjson", "yaml", "text"},
+			SchemaVersion: "0.2",
+		},
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(data, &got)
+	if got["name"] != "riffle" {
+		t.Errorf("name: %v", got["name"])
+	}
+	caps, ok := got["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatalf("capabilities missing")
+	}
+	if caps["streaming"] != true {
+		t.Errorf("streaming: %v", caps["streaming"])
+	}
+	formats, ok := caps["output_formats"].([]any)
+	if !ok || len(formats) != 4 {
+		t.Errorf("output_formats: %v", caps["output_formats"])
+	}
+}
+
+func TestDefaultCapabilities(t *testing.T) {
+	caps := DefaultCapabilities()
+	if !caps.Streaming {
+		t.Error("Streaming should be true")
+	}
+	if caps.DryRun {
+		t.Error("DryRun should be false")
+	}
+	if len(caps.OutputFormats) != 4 {
+		t.Errorf("OutputFormats: %v", caps.OutputFormats)
+	}
+	if caps.SchemaVersion != SchemaVersion {
+		t.Errorf("SchemaVersion: %q", caps.SchemaVersion)
+	}
+}
+
+func TestReturnSchemaOutputSchema(t *testing.T) {
+	rs := ReturnSchema{
+		Type:         "json",
+		Description:  "A result",
+		OutputSchema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}}}`),
+	}
+	data, err := json.Marshal(rs)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(data, &got)
+	if got["output_schema"] == nil {
+		t.Error("output_schema must be present")
+	}
+}
+
 func TestAgentErrorExtendedFields(t *testing.T) {
 	var capturedCode int
 	ExitFunc = func(code int) { capturedCode = code }

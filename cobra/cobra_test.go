@@ -35,7 +35,7 @@ func TestSchemaGeneration(t *testing.T) {
 			Description: "Operation metadata and timestamps",
 			Shape:       map[string]any{"id": "string", "timestamp": "int64"},
 		},
-		Examples: []string{"demo server-123 --limit 5"},
+		Examples: []murli.Example{{Command: "demo server-123 --limit 5"}},
 	})
 
 	buf := &bytes.Buffer{}

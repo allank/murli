@@ -1,5 +1,7 @@
 package murli
 
+import "encoding/json"
+
 // Metadata provides LLM-specific parameters to supplement standard CLI command definitions.
 type Metadata struct {
 	// AgentDescription is a detailed description of the command's scope.
@@ -24,7 +26,12 @@ type Metadata struct {
 	Returns *ReturnSchema `json:"returns,omitempty"`
 
 	// Examples contains concrete shell invocations for agent in-context learning.
-	Examples []string `json:"examples,omitempty"`
+	// Changed from []string to []Example in v0.3.
+	Examples []Example `json:"examples,omitempty"`
+
+	// FlagAnnotations provides extended metadata keyed by flag name, for fields that
+	// cannot be auto-detected from the CLI framework (env var binding, enum values, etc.).
+	FlagAnnotations map[string]FlagAnnotation `json:"flag_annotations,omitempty"`
 }
 
 // ArgumentMetadata documents a single positional argument.
@@ -37,7 +44,10 @@ type ArgumentMetadata struct {
 
 // ReturnSchema describes the shape of successful command output.
 type ReturnSchema struct {
-	Type        string         `json:"type"`
-	Description string         `json:"description"`
-	Shape       map[string]any `json:"shape,omitempty"`
+	Type        string          `json:"type"`
+	Description string          `json:"description"`
+	Shape       map[string]any  `json:"shape,omitempty"`
+	// OutputSchema carries a raw JSON Schema (draft-2020-12) blob when the engineer
+	// provides it via Annotate(). murli serialises it as-is into --schema and describe output.
+	OutputSchema json.RawMessage `json:"output_schema,omitempty"`
 }
