@@ -94,9 +94,3 @@ func (w *Writer) WriteError(err *AgentError) {
 	}
 	ExitFunc(err.Code)
 }
-
-// Temporary placeholders — SchemaVersion and ToolVersion will be moved to
-// version.go in Task 3. Remove these lines when version.go is created.
-const SchemaVersion = "0.2"
-
-var ToolVersion = ""

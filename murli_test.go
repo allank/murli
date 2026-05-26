@@ -231,6 +231,51 @@ func TestLogDeduplication(t *testing.T) {
 	})
 }
 
+func TestVersionInSuccessEnvelope(t *testing.T) {
+	ToolVersion = "1.2.3"
+	defer func() { ToolVersion = "" }()
+
+	buf := &bytes.Buffer{}
+	w := &Writer{stdout: buf, isTTY: false}
+	w.WriteSuccess("done", map[string]any{"key": "val"})
+
+	var resp map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &resp); err != nil {
+		t.Fatalf("JSON parse failed: %v\nOutput: %s", err, buf.String())
+	}
+	if resp["schema_version"] != SchemaVersion {
+		t.Errorf("schema_version: want %q, got %v", SchemaVersion, resp["schema_version"])
+	}
+	if resp["tool_version"] != "1.2.3" {
+		t.Errorf("tool_version: want %q, got %v", "1.2.3", resp["tool_version"])
+	}
+}
+
+func TestVersionInErrorEnvelope(t *testing.T) {
+	ToolVersion = "2.0.0"
+	defer func() { ToolVersion = "" }()
+
+	var capturedCode int
+	ExitFunc = func(code int) { capturedCode = code }
+	defer func() { ExitFunc = func(code int) {} }()
+
+	buf := &bytes.Buffer{}
+	w := &Writer{stderr: buf, isTTY: false}
+	w.WriteError(NewToolError("disk full"))
+
+	_ = capturedCode
+	var got AgentError
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("JSON parse failed: %v\nOutput: %s", err, buf.String())
+	}
+	if got.SchemaVersion != SchemaVersion {
+		t.Errorf("schema_version: want %q, got %q", SchemaVersion, got.SchemaVersion)
+	}
+	if got.ToolVersion != "2.0.0" {
+		t.Errorf("tool_version: want %q, got %q", "2.0.0", got.ToolVersion)
+	}
+}
+
 func TestAgentErrorExtendedFields(t *testing.T) {
 	var capturedCode int
 	ExitFunc = func(code int) { capturedCode = code }
