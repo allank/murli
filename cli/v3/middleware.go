@@ -85,6 +85,21 @@ func Wrap(app *cli.Command) {
 
 func wrapCommands(cmds []*cli.Command, root *cli.Command) {
 	for _, cmd := range cmds {
+		// Skip commands already wrapped by murli.
+		alreadyWrapped := false
+		for _, f := range cmd.Flags {
+			if names := f.Names(); len(names) > 0 && names[0] == "schema" {
+				alreadyWrapped = true
+				break
+			}
+		}
+		if alreadyWrapped {
+			if len(cmd.Commands) > 0 {
+				wrapCommands(cmd.Commands, root)
+			}
+			continue
+		}
+
 		cmd.Flags = append(cmd.Flags,
 			&cli.BoolFlag{Name: "schema", Usage: "Output agent-optimized JSON schema"},
 			&cli.BoolFlag{Name: "agent", Usage: "Force agent-optimized JSON mode"},
@@ -120,6 +135,28 @@ func wrapCommands(cmds []*cli.Command, root *cli.Command) {
 						Suggestion:  "Use --protocol-version 0.1 or --protocol-version 0.2",
 						Recoverable: true,
 						ValidValues: murli.ValidProtocolVersions,
+					})
+					return nil
+				}
+			}
+
+			// Output format validation.
+			if outFmt := c.String("output"); outFmt != "" {
+				valid := false
+				for _, v := range murli.ValidOutputFormats {
+					if outFmt == v {
+						valid = true
+						break
+					}
+				}
+				if !valid {
+					w.WriteError(&murli.AgentError{
+						Code:        murli.ExitUserError,
+						ErrorType:   "invalid_output_format",
+						Message:     fmt.Sprintf("unknown --output value %q", outFmt),
+						Suggestion:  "Use --output json, ndjson, yaml, or text",
+						Recoverable: true,
+						ValidValues: murli.ValidOutputFormats,
 					})
 					return nil
 				}
