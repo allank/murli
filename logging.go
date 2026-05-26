@@ -4,8 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"time"
 )
+
+// ansiRe matches ANSI CSI escape sequences (e.g. \x1b[32m, \x1b[0m).
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// stripANSI removes ANSI CSI escape sequences from s.
+func stripANSI(s string) string {
+	return ansiRe.ReplaceAllString(s, "")
+}
 
 // Logger writes diagnostic messages to stderr.
 // TTY mode: human-readable plain text.
@@ -26,11 +35,14 @@ func NewLogger(writer io.Writer, isTTY bool) *Logger {
 }
 
 // Log writes a message. In TTY mode: plain text. In agent mode: NDJSON with deduplication.
+// ANSI escape codes are stripped in agent mode.
 func (l *Logger) Log(line string) {
 	if l.isTTY {
 		fmt.Fprintln(l.writer, line)
 		return
 	}
+	// Strip ANSI codes in agent mode before deduplication and storage.
+	line = stripANSI(line)
 	if line == l.lastLine && !l.isProgress {
 		l.dupCount++
 		return
@@ -44,12 +56,14 @@ func (l *Logger) Log(line string) {
 
 // LogProgress writes a progress message.
 // TTY: overwrites current line with carriage return.
-// Agent: NDJSON with level "progress" and deduplication.
+// Agent: NDJSON with level "progress" and deduplication. ANSI codes stripped.
 func (l *Logger) LogProgress(line string) {
 	if l.isTTY {
 		fmt.Fprintf(l.writer, "\r\033[K%s", line)
 		return
 	}
+	// Strip ANSI codes in agent mode.
+	line = stripANSI(line)
 	if line == l.lastLine && l.isProgress {
 		l.dupCount++
 		return

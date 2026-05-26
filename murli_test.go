@@ -753,3 +753,31 @@ func TestAgentErrorExtendedFields(t *testing.T) {
 		t.Errorf("Field: want %q, got %q", "region", got.Field)
 	}
 }
+
+func TestANSIStrippingInAgentMode(t *testing.T) {
+	stderr := &bytes.Buffer{}
+	logger := NewLogger(stderr, false) // agent mode (not TTY)
+
+	logger.Log("\x1b[32mGreen text\x1b[0m")
+	logger.Flush()
+
+	var entry map[string]any
+	if err := json.Unmarshal(stderr.Bytes(), &entry); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, stderr.String())
+	}
+	if entry["msg"] != "Green text" {
+		t.Errorf("expected ANSI stripped, got msg = %q", entry["msg"])
+	}
+}
+
+func TestANSIStrippingInTTYMode(t *testing.T) {
+	stderr := &bytes.Buffer{}
+	logger := NewLogger(stderr, true) // TTY mode — ANSI preserved
+
+	logger.Log("\x1b[32mGreen text\x1b[0m")
+
+	// TTY mode writes immediately (no Flush needed), ANSI preserved
+	if !strings.Contains(stderr.String(), "\x1b[32m") {
+		t.Errorf("expected ANSI preserved in TTY mode, got: %q", stderr.String())
+	}
+}
