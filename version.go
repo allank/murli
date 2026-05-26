@@ -5,7 +5,11 @@ package murli
 const SchemaVersion = "0.2"
 
 // ToolVersion is the version of the CLI tool using murli.
-// Set this at startup, typically from ldflags:
+// Set this in your main() using a version variable injected at build time:
 //
-//	murli.ToolVersion = version // injected by -ldflags "-X main.version=1.2.3"
+//	murli.ToolVersion = version // where `version` is set via -ldflags "-X main.version=1.2.3"
+//
+// Or inject directly at build time:
+//
+//	-ldflags "-X github.com/allank/murli.ToolVersion=1.2.3"
 var ToolVersion = ""

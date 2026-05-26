@@ -51,20 +51,23 @@ func (w *Writer) Flush() {
 }
 
 // WriteSuccess writes to stdout. TTY mode writes humanText; agent mode writes a
-// JSON envelope with status, schema_version, tool_version, and result.
+// JSON envelope with status, schema_version, tool_version (if set), and result.
 func (w *Writer) WriteSuccess(humanText string, jsonPayload any) {
 	if w.isTTY {
 		fmt.Fprintln(w.stdout, humanText)
 	} else {
+		envelope := map[string]any{
+			"status":         "ok",
+			"schema_version": SchemaVersion,
+			"result":         jsonPayload,
+		}
+		if ToolVersion != "" {
+			envelope["tool_version"] = ToolVersion
+		}
 		enc := json.NewEncoder(w.stdout)
 		enc.SetIndent("", "  ")
 		enc.SetEscapeHTML(false)
-		_ = enc.Encode(map[string]any{
-			"status":         "ok",
-			"schema_version": SchemaVersion,
-			"tool_version":   ToolVersion,
-			"result":         jsonPayload,
-		})
+		_ = enc.Encode(envelope)
 	}
 }
 

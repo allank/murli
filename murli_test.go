@@ -49,6 +49,23 @@ func TestSuccessWriter(t *testing.T) {
 			t.Errorf("expected result count 42, got %v", resp.Result["count"])
 		}
 	})
+
+	t.Run("Agent mode omits tool_version when unset", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		w := &Writer{stdout: buf, isTTY: false}
+		w.WriteSuccess("done", nil)
+
+		var env map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+			t.Fatalf("JSON parse: %v", err)
+		}
+		if _, present := env["tool_version"]; present {
+			t.Errorf("tool_version must be absent when ToolVersion is empty, got: %v", env["tool_version"])
+		}
+		if env["schema_version"] != SchemaVersion {
+			t.Errorf("schema_version must always be present, got: %v", env["schema_version"])
+		}
+	})
 }
 
 // TestErrorWriter verifies structured error serialization and exit code triggering.
@@ -263,7 +280,9 @@ func TestVersionInErrorEnvelope(t *testing.T) {
 	w := &Writer{stderr: buf, isTTY: false}
 	w.WriteError(NewToolError("disk full"))
 
-	_ = capturedCode
+	if capturedCode != ExitToolError {
+		t.Errorf("exit code: want %d, got %d", ExitToolError, capturedCode)
+	}
 	var got AgentError
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("JSON parse failed: %v\nOutput: %s", err, buf.String())
