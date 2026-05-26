@@ -94,6 +94,57 @@ func TestSchemaGeneration(t *testing.T) {
 	}
 }
 
+func TestFlagAnnotationInSchema(t *testing.T) {
+	root := &cobra.Command{Use: "demo", Short: "Demo"}
+	root.Flags().String("region", "", "AWS region")
+	root.Flags().String("format", "", "Output format")
+
+	murliCobra.Annotate(root, murli.Metadata{
+		AgentDescription: "Demo command",
+		FlagAnnotations: map[string]murli.FlagAnnotation{
+			"region": {
+				Env:        "AWS_REGION",
+				Enum:       []string{"us-east-1", "eu-west-1"},
+				Persistent: true,
+			},
+			"format": {
+				MutuallyExclusiveWith: []string{"json"},
+			},
+		},
+	})
+
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	if err := murliCobra.EmitSchema(root); err != nil {
+		t.Fatalf("EmitSchema: %v", err)
+	}
+
+	var schema murli.CommandSchema
+	if err := json.Unmarshal(buf.Bytes(), &schema); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	var regionFlag *murli.FlagSchema
+	for i := range schema.Flags {
+		if schema.Flags[i].Name == "region" {
+			regionFlag = &schema.Flags[i]
+			break
+		}
+	}
+	if regionFlag == nil {
+		t.Fatal("region flag not found in schema")
+	}
+	if regionFlag.Env != "AWS_REGION" {
+		t.Errorf("Env: got %q, want %q", regionFlag.Env, "AWS_REGION")
+	}
+	if len(regionFlag.Enum) != 2 {
+		t.Errorf("Enum: got %v, want 2 items", regionFlag.Enum)
+	}
+	if !regionFlag.Persistent {
+		t.Errorf("Persistent: expected true")
+	}
+}
+
 func TestMutatingGuardBlocksInAgentMode(t *testing.T) {
 	var capturedExit int
 	murli.ExitFunc = func(code int) { capturedExit = code }

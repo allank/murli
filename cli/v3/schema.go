@@ -18,10 +18,11 @@ func EmitSchema(cmd *cli.Command, w io.Writer) error {
 		WhenToUse:        meta.WhenToUse,
 		AgentDescription: meta.AgentDescription,
 		Idempotent:       meta.Idempotent,
+		Mutating:         meta.Mutating,
 		Returns:          meta.Returns,
 		Examples:         meta.Examples,
 		Arguments:        meta.Arguments,
-		Flags:            v3FlagSchemas(cmd.Flags),
+		Flags:            v3FlagSchemas(cmd.Flags, meta.FlagAnnotations),
 		Subcommands:      v3SubcommandSchemas(cmd.Commands),
 	}
 
@@ -31,7 +32,8 @@ func EmitSchema(cmd *cli.Command, w io.Writer) error {
 	return enc.Encode(schema)
 }
 
-func v3FlagSchemas(flags []cli.Flag) []murli.FlagSchema {
+func v3FlagSchemas(flags []cli.Flag, annotations map[string]murli.FlagAnnotation) []murli.FlagSchema {
+	skipped := map[string]bool{"schema": true, "agent": true, "output": true, "protocol-version": true}
 	var list []murli.FlagSchema
 	for _, f := range flags {
 		names := f.Names()
@@ -39,15 +41,19 @@ func v3FlagSchemas(flags []cli.Flag) []murli.FlagSchema {
 			continue
 		}
 		name := names[0]
-		if name == "schema" || name == "agent" {
+		if skipped[name] {
 			continue
 		}
-		list = append(list, murli.FlagSchema{
+		fs := murli.FlagSchema{
 			Name:        name,
 			Type:        v3FlagType(f),
 			Default:     v3FlagDefault(f),
 			Description: v3FlagUsage(f),
-		})
+		}
+		if ann, ok := annotations[name]; ok {
+			murli.ApplyFlagAnnotation(&fs, ann)
+		}
+		list = append(list, fs)
 	}
 	return list
 }

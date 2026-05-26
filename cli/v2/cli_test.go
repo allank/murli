@@ -72,6 +72,53 @@ func TestV2SchemaEmit(t *testing.T) {
 	}
 }
 
+func TestFlagAnnotationInSchemaV2(t *testing.T) {
+	cmd := &cli.Command{
+		Name:  "query",
+		Usage: "Query",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "region", Usage: "AWS region"},
+		},
+		Action: func(ctx *cli.Context) error { return nil },
+	}
+
+	murliCLI.Annotate(cmd, murli.Metadata{
+		FlagAnnotations: map[string]murli.FlagAnnotation{
+			"region": {
+				Env:  "AWS_REGION",
+				Enum: []string{"us-east-1", "eu-west-1"},
+			},
+		},
+	})
+
+	buf := &bytes.Buffer{}
+	if err := murliCLI.EmitSchema(cmd, buf); err != nil {
+		t.Fatalf("EmitSchema: %v", err)
+	}
+
+	var schema murli.CommandSchema
+	if err := json.Unmarshal(buf.Bytes(), &schema); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	var regionFlag *murli.FlagSchema
+	for i := range schema.Flags {
+		if schema.Flags[i].Name == "region" {
+			regionFlag = &schema.Flags[i]
+			break
+		}
+	}
+	if regionFlag == nil {
+		t.Fatal("region flag not found in schema")
+	}
+	if regionFlag.Env != "AWS_REGION" {
+		t.Errorf("Env: got %q, want AWS_REGION", regionFlag.Env)
+	}
+	if len(regionFlag.Enum) != 2 {
+		t.Errorf("Enum: got %v, want 2 items", regionFlag.Enum)
+	}
+}
+
 func TestV2MiddlewareWrapsError(t *testing.T) {
 	var capturedExit int
 	murli.ExitFunc = func(code int) { capturedExit = code }

@@ -25,10 +25,11 @@ func EmitSchema(cmd *gocobra.Command) error {
 		WhenToUse:        meta.WhenToUse,
 		AgentDescription: meta.AgentDescription,
 		Idempotent:       meta.Idempotent,
+		Mutating:         meta.Mutating,
 		Returns:          meta.Returns,
 		Examples:         meta.Examples,
 		Arguments:        mergeArguments(cmd.Use, meta.Arguments),
-		Flags:            getFlagSchemas(cmd),
+		Flags:            getFlagSchemas(cmd, meta.FlagAnnotations),
 		Subcommands:      getSubcommandSchemas(cmd),
 	}
 
@@ -87,10 +88,10 @@ func mergeArguments(use string, customArgs []murli.ArgumentMetadata) []murli.Arg
 	return final
 }
 
-func getFlagSchemas(cmd *gocobra.Command) []murli.FlagSchema {
+func getFlagSchemas(cmd *gocobra.Command, annotations map[string]murli.FlagAnnotation) []murli.FlagSchema {
 	var list []murli.FlagSchema
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		if f.Name == "schema" || f.Name == "agent" {
+		if f.Name == "schema" || f.Name == "agent" || f.Name == "output" || f.Name == "protocol-version" {
 			return
 		}
 		t := f.Value.Type()
@@ -113,7 +114,11 @@ func getFlagSchemas(cmd *gocobra.Command) []murli.FlagSchema {
 				defVal = v
 			}
 		}
-		list = append(list, murli.FlagSchema{Name: f.Name, Type: t, Default: defVal, Description: f.Usage})
+		fs := murli.FlagSchema{Name: f.Name, Type: t, Default: defVal, Description: f.Usage}
+		if ann, ok := annotations[f.Name]; ok {
+			murli.ApplyFlagAnnotation(&fs, ann)
+		}
+		list = append(list, fs)
 	})
 	return list
 }
