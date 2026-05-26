@@ -188,6 +188,9 @@ func TestV2MutatingGuardBlocksInAgentMode(t *testing.T) {
 	if resp.ErrorType != "confirmation_required" {
 		t.Errorf("ErrorType: want %q, got %q", "confirmation_required", resp.ErrorType)
 	}
+	if !resp.Recoverable {
+		t.Error("confirmation_required error must be Recoverable = true")
+	}
 }
 
 func TestV2SchemaFlag(t *testing.T) {
