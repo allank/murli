@@ -230,3 +230,47 @@ func TestLogDeduplication(t *testing.T) {
 		}
 	})
 }
+
+func TestAgentErrorExtendedFields(t *testing.T) {
+	var capturedCode int
+	ExitFunc = func(code int) { capturedCode = code }
+	defer func() { ExitFunc = func(code int) {} }()
+
+	buf := &bytes.Buffer{}
+	w := &Writer{stderr: buf, isTTY: false}
+
+	err := &AgentError{
+		Code:         ExitRateLimited,
+		ErrorType:    "rate_limited",
+		Message:      "API quota exceeded",
+		Suggestion:   "Wait and retry.",
+		Recoverable:  true,
+		RetryAfterMs: 5000,
+		DocURL:       "https://example.com/rate-limits",
+		ValidValues:  []string{"us-east-1", "us-west-2"},
+		Field:        "region",
+	}
+
+	w.WriteError(err)
+
+	if capturedCode != ExitRateLimited {
+		t.Errorf("exit code: want %d, got %d", ExitRateLimited, capturedCode)
+	}
+
+	var got AgentError
+	if parseErr := json.Unmarshal(buf.Bytes(), &got); parseErr != nil {
+		t.Fatalf("JSON parse failed: %v\nOutput: %s", parseErr, buf.String())
+	}
+	if got.RetryAfterMs != 5000 {
+		t.Errorf("RetryAfterMs: want 5000, got %d", got.RetryAfterMs)
+	}
+	if got.DocURL != "https://example.com/rate-limits" {
+		t.Errorf("DocURL: want %q, got %q", "https://example.com/rate-limits", got.DocURL)
+	}
+	if len(got.ValidValues) != 2 || got.ValidValues[0] != "us-east-1" {
+		t.Errorf("ValidValues: want [us-east-1 us-west-2], got %v", got.ValidValues)
+	}
+	if got.Field != "region" {
+		t.Errorf("Field: want %q, got %q", "region", got.Field)
+	}
+}
