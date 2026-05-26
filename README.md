@@ -20,6 +20,8 @@ LLM-based agents interact with command-line tools differently than humans. While
 *   **Self-Documenting CLI:** Dynamically inspects commands, positional arguments, and flag trees to emit detailed schemas via a persistent global `--schema` flag.
 *   **Actionable, Structured Errors:** Intercepts routing, validation, and execution errors, wrapping them in JSON envelopes with dedicated exit codes and recovery suggestions to allow single-retry self-correction.
 *   **Token Efficiency:** Implements deferred logging that collapses consecutive duplicate log lines and telemetry progress indicators, saving LLM context window space. Telemetry is routed directly to `Stderr`, keeping `Stdout` clean.
+*   **Streaming Events:** Goroutine-safe NDJSON event streaming to `Stdout` for long-running operations that produce incremental results.
+*   **Mutation Safety:** Commands marked `Mutating: true` are automatically rejected in non-interactive (agent) mode, preventing accidental state changes without human confirmation.
 
 ---
 
@@ -68,6 +70,7 @@ var queryCmd = &cobra.Command{
 
 		writer.Progress("Searching database index...")
 		writer.Progress("Searching database index...") // Deduplicated automatically
+		writer.Flush()
 
 		results := []Result{{Path: "/docs/woodworking", Score: 0.95}}
 
@@ -267,11 +270,12 @@ Running `./yourtool query --schema` prints a detailed schema on `Stdout`. Positi
     $ ./riffle query woodworking
     Found 1 matching folders
     ```
-*   **Piped or captured agent mode** (or using the `--agent` override) formats the response strictly in JSON:
+*   **Piped or captured agent mode** (or using the `--agent` override) formats the response as a JSON envelope with `schema_version` and optional `tool_version`:
     ```bash
     $ ./riffle query woodworking | cat
     {
       "status": "ok",
+      "schema_version": "0.2",
       "result": [
         {
           "path": "/docs/woodworking",
@@ -297,39 +301,193 @@ Standard Go errors, routing failures, and flag parsing errors are automatically 
       "error": "flag_error",
       "message": "invalid argument \"abc\" for \"--top\" flag: strconv.ParseInt: parsing \"abc\": invalid syntax",
       "suggestion": "Check command usage with --schema or --help.",
-      "recoverable": true
+      "recoverable": true,
+      "schema_version": "0.2"
     }
     ```
 
-Return your own structured errors with `*murli.AgentError` to supply a `suggestion` and signal recoverability:
+Return your own structured errors using the convenience constructors or a full `*murli.AgentError`:
 
 ```go
+// Convenience constructors (v0.2+)
+return murli.NewUserError("Query string cannot be empty", "Provide a conceptual search keyword.")
+return murli.NewToolError("Database connection failed: timeout after 30s")
+
+// Full control — set extended fields as needed
 return &murli.AgentError{
-    Code:        murli.ExitUserError,
-    ErrorType:   "empty_query",
-    Message:     "Query string cannot be empty",
-    Suggestion:  "Provide a conceptual search keyword.",
-    Recoverable: true,
+    Code:         murli.ExitNotFound,
+    ErrorType:    "index_missing",
+    Message:      "Semantic index not found at ~/.riffle/index",
+    Suggestion:   "Run `riffle index build` to create the index first.",
+    Recoverable:  false,
+    DocURL:       "https://example.com/docs/indexing",
 }
 ```
+
+`AgentError` extended fields (all optional):
+
+| Field | Type | Purpose |
+|---|---|---|
+| `ValidValues` | `[]string` | Enumerable valid inputs when a bad value was supplied |
+| `RetryAfterMs` | `int` | Milliseconds to wait before retrying (use with `ExitRateLimited`) |
+| `DocURL` | `string` | Link to relevant documentation |
+| `Field` | `string` | Name of the specific flag or argument that caused the error |
 
 ### 4. Exit Code Mapping
 
 `murli` standardizes exit codes to tell agents how to handle command failures:
 
-| Exit Code | Constant Name | Meaning | Agent Action |
+**Table-stakes (v0.1+)**
+
+| Exit Code | Constant | Meaning | Agent Action |
 |---|---|---|---|
 | `0` | `ExitOK` | Successful execution | Proceed with next task. |
 | `1` | `ExitUserError` | Bad input or argument configuration | Read `suggestion`, fix parameters, and retry. |
-| `2` | `ExitToolError` | Environment, network, or filesystem crash | Surface crash to user; do not retry immediately. |
+| `2` | `ExitToolError` | Environment, network, or filesystem crash | Surface to user; do not retry immediately. |
 | `3` | `ExitPartial` | Some operations succeeded, some failed | Inspect response list, retry on subset if needed. |
+
+**Extended taxonomy (v0.2+)**
+
+| Exit Code | Constant | Meaning | Agent Action |
+|---|---|---|---|
+| `4` | `ExitTimeout` | Operation timed out | Retry after a delay; the operation may be retryable. |
+| `5` | `ExitNotFound` | Requested resource does not exist | Verify the resource exists; do not retry blindly. |
+| `6` | `ExitPermission` | Caller lacks permission | Not retryable without an auth or config change. |
+| `7` | `ExitConflict` | State conflict (resource already exists, etc.) | Read current state before deciding whether to retry. |
+| `8` | `ExitRateLimited` | Rate limit hit | Wait at least `retry_after_ms` milliseconds before retrying. |
+| `9` | `ExitCancelled` | Operation cancelled by signal or context | Do not retry unless the parent operation resumes. |
+
+### 5. NDJSON Log Output (v0.2+)
+
+In agent mode, `w.Log()` and `w.Progress()` write newline-delimited JSON to `Stderr`. Consecutive duplicate messages are collapsed into a single entry with a `repeated` count, keeping agent context windows clean.
+
+```bash
+$ ./riffle index build | cat 2>logs.ndjson
+# logs.ndjson contains:
+{"ts":"2026-05-26T10:00:00.123Z","level":"info","msg":"Scanning /docs"}
+{"ts":"2026-05-26T10:00:01.456Z","level":"progress","msg":"Indexed 500/2000 files","repeated":4}
+{"ts":"2026-05-26T10:00:03.789Z","level":"info","msg":"Build complete"}
+```
+
+In TTY mode the same calls produce plain text on `Stderr`, with progress lines overwriting in-place (carriage return).
+
+### 6. Structured Progress Events (v0.2+)
+
+For operations with measurable progress, use `WriteProgress()` instead of `Progress()`:
+
+```go
+writer.WriteProgress(murli.ProgressEvent{
+    Stage:   "indexing",
+    Current: 500,
+    Total:   2000,
+    Percent: 25.0,
+    EtaMs:   6000,
+    Message: "Indexing files",
+})
+```
+
+*   **Agent mode** — minified JSON on one line to `Stderr`:
+    ```json
+    {"stage":"indexing","current":500,"total":2000,"percent":25,"eta_ms":6000,"message":"Indexing files"}
+    ```
+*   **TTY mode** — human-readable line with carriage return to overwrite:
+    ```
+    [indexing] Indexing files (500/2000, 25%)
+    ```
+
+All `ProgressEvent` fields are optional — populate what is meaningful for your operation.
+
+### 7. NDJSON Event Streaming (v0.2+)
+
+Use `WriteEvent()` to stream incremental results to `Stdout` as they are produced. This is safe to call concurrently from multiple goroutines.
+
+```go
+var wg sync.WaitGroup
+for _, file := range files {
+    wg.Add(1)
+    go func(f string) {
+        defer wg.Done()
+        result := process(f)
+        writer.WriteEvent(result) // goroutine-safe
+    }(file)
+}
+wg.Wait()
+// Call WriteSuccess or WriteError only after all WriteEvent calls complete.
+writer.WriteSuccess("Processing complete", nil)
+```
+
+Each event is written as a single minified JSON line on `Stdout`. `WriteEvent` is a no-op in TTY mode (events are machine-only).
+
+### 8. Mutation Safety (v0.2+)
+
+Mark commands that write, delete, or otherwise change state with `Mutating: true`:
+
+```go
+murliCobra.Annotate(deleteCmd, murli.Metadata{
+    AgentDescription: "Permanently deletes an index.",
+    WhenToUse:        "Use to remove a stale or corrupt index.",
+    Mutating:         true,
+})
+```
+
+When a mutating command runs in non-interactive (agent) mode — i.e. piped output — the adapter automatically rejects it before executing any business logic:
+
+```json
+{
+  "code": 1,
+  "error": "confirmation_required",
+  "message": "This command mutates state and requires explicit confirmation.",
+  "suggestion": "Mutation requires confirmation. Use a TTY (interactive terminal) to run this command, or wait for --force support in a future release.",
+  "recoverable": true,
+  "schema_version": "0.2"
+}
+```
+
+This prevents agents from accidentally deleting or modifying state without human oversight. An interactive bypass (`--force` / `--yes`) is planned for v0.4.
+
+### 9. Version Stamps (v0.2+)
+
+All output envelopes carry `schema_version`. The success envelope also carries `tool_version` when set, so consumers know exactly which version of your tool produced the output.
+
+Set `murli.ToolVersion` in your `main()` using a build-time variable:
+
+```go
+// In main.go
+var version = "dev" // overridden by -ldflags at build time
+
+func main() {
+    murli.ToolVersion = version
+    // ...
+}
+```
+
+```bash
+go build -ldflags "-X main.version=1.2.3" -o riffle .
+```
+
+Or inject directly into the murli package at build time:
+
+```bash
+go build -ldflags "-X github.com/allank/murli.ToolVersion=1.2.3" -o riffle .
+```
+
+When set, the success envelope includes `tool_version`:
+
+```json
+{
+  "status": "ok",
+  "schema_version": "0.2",
+  "tool_version": "1.2.3",
+  "result": [...]
+}
+```
 
 ---
 
 ## 🧪 Testing
 
 ```bash
-go test -v ./...
+go test -race ./...
 ```
 
 ---
