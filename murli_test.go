@@ -937,7 +937,10 @@ func TestCheckConventions_FlagViolation(t *testing.T) {
 
 func TestCheckConventions_ConventionalVocabulary(t *testing.T) {
 	voc := ConventionalVocabulary()
-	if voc["vocabulary"] == nil {
-		t.Errorf("expected vocabulary map in ConventionalVocabulary()")
+	if voc == nil || voc.Vocabulary == nil {
+		t.Errorf("expected non-nil vocabulary in ConventionalVocabulary()")
+	}
+	if _, ok := voc.Vocabulary["get"]; !ok {
+		t.Errorf("expected 'get' in conventional vocabulary")
 	}
 }

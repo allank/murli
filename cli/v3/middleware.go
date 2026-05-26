@@ -142,7 +142,9 @@ func isTTYWriter(w io.Writer) bool {
 func collectV3Names(cmd *cli.Command, cmds, flags *[]string) {
 	*cmds = append(*cmds, cmd.Name)
 	for _, f := range cmd.Flags {
-		*flags = append(*flags, f.Names()[0])
+		if names := f.Names(); len(names) > 0 {
+			*flags = append(*flags, names[0])
+		}
 	}
 	for _, sub := range cmd.Commands {
 		collectV3Names(sub, cmds, flags)
