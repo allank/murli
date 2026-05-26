@@ -482,6 +482,145 @@ When set, the success envelope includes `tool_version`:
 }
 ```
 
+### 10. Whole-Tool Introspection — `describe` (v0.3+)
+
+The `describe` subcommand is auto-mounted on the root command by `Enable()`/`Wrap()`. It dumps the complete command tree as a single JSON document — zero engineer effort required.
+
+```bash
+$ ./riffle describe
+{
+  "name": "riffle",
+  "summary": "Riffle semantic search",
+  "schema_version": "0.2",
+  "capabilities": {
+    "streaming": true,
+    "dry_run": false,
+    "output_formats": ["json", "ndjson", "yaml", "text"],
+    "schema_version": "0.2"
+  },
+  "conventions": {
+    "vocabulary": {
+      "get": "preferred verb for read operations (over fetch, info, retrieve)",
+      "list": "preferred verb for enumeration (over show-all, ls, enumerate)"
+    }
+  },
+  "commands": [
+    {
+      "name": "query",
+      "summary": "Semantic query search",
+      "idempotent": true,
+      "flags": [...],
+      "returns": {...}
+    }
+  ]
+}
+```
+
+Agents can call `describe` once at startup to discover all commands, their metadata, capabilities, and recommended vocabulary — without parsing help text.
+
+### 11. Output Format Routing — `--output` (v0.3+)
+
+`--output` is a persistent flag auto-registered on every command. Supported values:
+
+| Value | Behavior |
+|---|---|
+| `json` (default in agent mode) | Pretty-printed JSON envelope |
+| `ndjson` | Minified single-line JSON envelope |
+| `yaml` | YAML-encoded envelope |
+| `text` | Plain human-readable text (same as TTY mode) |
+
+```bash
+$ ./riffle query woodworking --output yaml
+status: ok
+schema_version: "0.2"
+result:
+  - path: /docs/woodworking
+    score: 0.95
+```
+
+### 12. Protocol Version Negotiation — `--protocol-version` (v0.3+)
+
+`--protocol-version` is a persistent flag that adjusts the envelope schema for older consumers. Valid values: `0.1`, `0.2` (default).
+
+With `--protocol-version=0.1`, all envelopes omit `schema_version` and `tool_version` — useful when connecting murli-powered tools to older agent frameworks that don't expect those fields.
+
+### 13. Rich Flag Contracts — `FlagAnnotation` (v0.3+)
+
+Provide per-flag extended metadata via `Metadata.FlagAnnotations`. These fields appear in `--schema` and `describe` output, giving agents richer signal for parameter construction:
+
+```go
+murliCobra.Annotate(queryCmd, murli.Metadata{
+    FlagAnnotations: map[string]murli.FlagAnnotation{
+        "region": {
+            Env:        "AWS_REGION",
+            Enum:       []string{"us-east-1", "eu-west-1", "ap-southeast-1"},
+            Persistent: true,
+        },
+        "token": {
+            Env:       "RIFFLE_TOKEN",
+            Sensitive: true,
+        },
+        "top": {
+            MutuallyExclusiveWith: []string{"all"},
+            Pattern:               `^\d+$`,
+        },
+    },
+})
+```
+
+Available annotation fields:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `Env` | `string` | Environment variable that sets this flag |
+| `Sensitive` | `bool` | Flag carries secrets; agents should not log its value |
+| `Persistent` | `bool` | Flag applies to all subcommands |
+| `MutuallyExclusiveWith` | `[]string` | Other flag names that cannot be set at the same time |
+| `Enum` | `[]string` | Exhaustive list of valid values |
+| `Pattern` | `string` | Regex pattern the value must match |
+
+### 14. Typed Examples (v0.3+)
+
+`Metadata.Examples` is now `[]murli.Example` (changed from `[]string` in v0.2). Each example carries a command string, optional description, and expected exit code:
+
+```go
+Examples: []murli.Example{
+    {
+        Command:     "riffle query woodworking",
+        Description: "Find woodworking folders",
+    },
+    {
+        Command:          "riffle query --top 20 art",
+        Description:      "Return top 20 art matches",
+        ExpectedExitCode: 0,
+    },
+},
+```
+
+`ExpectedExitCode` defaults to `0` (success) and is omitted from JSON output when zero.
+
+### 15. Naming Convention Advisory (v0.3+)
+
+In TTY mode, murli emits advisory warnings to stderr when non-conventional command or flag names are detected:
+
+```
+[murli advisory] command "fetch": prefer "get" (conventional vocabulary)
+[murli advisory] flag --format: prefer --output (conventional vocabulary)
+```
+
+Warnings are informational only — they never block execution and are suppressed entirely in agent mode. The advisory system checks against conventional vocabulary derived from Cloudflare CLI guidelines:
+
+- Commands: `get` over `fetch`/`info`/`retrieve`; `list` over `show-all`/`ls`/`enumerate`; `delete` over `remove`/`rm`; `create` over `add`/`new`/`make`; `update` over `edit`/`modify`/`set`
+- Flags: `--force` over `--skip-confirmations`/`--no-confirm`; `--quiet` over `--silent`/`--no-output`; `--dry-run` over `--preview`/`--what-if`; `--output` over `--format`/`--output-format`
+
+### 16. ANSI Stripping in Agent Mode (v0.3+)
+
+ANSI escape codes in log messages (e.g. colour output from upstream libraries) are automatically stripped when writing to `Stderr` in agent mode, keeping NDJSON log entries clean for parsers.
+
+```go
+writer.Log("\x1b[32mSuccess\x1b[0m") // TTY: green "Success"; agent: plain "Success" in JSON
+```
+
 ---
 
 ## 🧪 Testing
