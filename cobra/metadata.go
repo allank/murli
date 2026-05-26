@@ -2,6 +2,7 @@ package cobra
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/allank/murli"
 	"github.com/spf13/cobra"
@@ -9,9 +10,12 @@ import (
 
 // Annotate serializes murli Metadata and binds it to a Cobra command's Annotations map.
 func Annotate(cmd *cobra.Command, meta murli.Metadata) {
+	data, err := json.Marshal(meta)
+	if err != nil {
+		panic(fmt.Sprintf("murli: Annotate: failed to marshal metadata for command %q: %v\nHint: check that ReturnSchema.OutputSchema is valid JSON", cmd.Name(), err))
+	}
 	if cmd.Annotations == nil {
 		cmd.Annotations = make(map[string]string)
 	}
-	data, _ := json.Marshal(meta)
 	cmd.Annotations["agentcobra"] = string(data)
 }

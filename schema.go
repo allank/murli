@@ -17,7 +17,9 @@ type CommandSchema struct {
 
 // FlagSchema represents a single CLI flag in the JSON schema.
 // Basic fields (Name, Type, Default, Description) are auto-populated by the adapter.
-// Extended fields are populated from Metadata.FlagAnnotations[flagName] when provided.
+// Extended fields (Env, Sensitive, Persistent, MutuallyExclusiveWith, Enum, Pattern)
+// are populated from Metadata.FlagAnnotations[flagName] by the adapter schema emitters
+// (see cobra/schema.go, cli/v2/schema.go, cli/v3/schema.go).
 type FlagSchema struct {
 	Name                  string   `json:"name"`
 	Type                  string   `json:"type"`
@@ -57,6 +59,10 @@ type FlagAnnotation struct {
 }
 
 // ApplyFlagAnnotation merges a FlagAnnotation onto a FlagSchema in place.
+// Boolean fields (Sensitive, Persistent) are one-way: they can be set to true
+// but not cleared to false. This is intentional — ApplyFlagAnnotation is applied
+// to a zero-value FlagSchema, so false is the default and only needs to be set once.
+// Slice fields (MutuallyExclusiveWith, Enum) are deep-copied to prevent aliasing.
 func ApplyFlagAnnotation(fs *FlagSchema, ann FlagAnnotation) {
 	if ann.Env != "" {
 		fs.Env = ann.Env
@@ -95,6 +101,10 @@ type DescribeCommandSchema struct {
 }
 
 // DescribeOutput is emitted by the auto-mounted `describe` subcommand.
+// Commands lists the root-level commands of the tool. Each DescribeCommandSchema
+// within Commands has its own Subcommands field for nested commands, creating
+// a recursive tree. The top-level field is named "commands" (not "subcommands")
+// to distinguish root commands from nested subcommands.
 type DescribeOutput struct {
 	Name          string                  `json:"name"`
 	Summary       string                  `json:"summary"`
@@ -109,7 +119,7 @@ type DescribeOutput struct {
 type Capabilities struct {
 	Streaming       bool     `json:"streaming"`
 	DryRun          bool     `json:"dry_run"`
-	OutputFormats   []string `json:"output_formats"`
+	OutputFormats   []string `json:"output_formats,omitempty"`
 	SchemaVersion   string   `json:"schema_version"`
 	ToolVersion     string   `json:"tool_version,omitempty"`
 	ProtocolVersion string   `json:"protocol_version,omitempty"`

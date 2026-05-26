@@ -597,6 +597,52 @@ func TestApplyFlagAnnotationDeepCopy(t *testing.T) {
 	}
 }
 
+func TestApplyFlagAnnotationDeepCopyMutuallyExclusive(t *testing.T) {
+	fs := FlagSchema{Name: "x"}
+	mexWith := []string{"a", "b"}
+	ann := FlagAnnotation{MutuallyExclusiveWith: mexWith}
+	ApplyFlagAnnotation(&fs, ann)
+	// Mutate original — must not affect fs.MutuallyExclusiveWith
+	mexWith[0] = "CHANGED"
+	if fs.MutuallyExclusiveWith[0] != "a" {
+		t.Errorf("MutuallyExclusiveWith deep copy violated: fs.MutuallyExclusiveWith[0] = %q", fs.MutuallyExclusiveWith[0])
+	}
+}
+
+func TestReturnSchemaOutputSchemaOmitsNil(t *testing.T) {
+	rs := ReturnSchema{Type: "json", Description: "A result"}
+	data, err := json.Marshal(rs)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(data, &got)
+	if _, present := got["output_schema"]; present {
+		t.Errorf("output_schema must be omitted when nil, got: %v", got["output_schema"])
+	}
+}
+
+func TestReturnSchemaOutputSchemaRoundTrip(t *testing.T) {
+	blob := `{"type":"object","properties":{"id":{"type":"string"}}}`
+	rs := ReturnSchema{
+		Type:         "json",
+		Description:  "A result",
+		OutputSchema: json.RawMessage(blob),
+	}
+	data, err := json.Marshal(rs)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// Round-trip: unmarshal back into ReturnSchema
+	var rs2 ReturnSchema
+	if err := json.Unmarshal(data, &rs2); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if string(rs2.OutputSchema) != blob {
+		t.Errorf("OutputSchema round-trip failed:\n  want: %s\n  got:  %s", blob, string(rs2.OutputSchema))
+	}
+}
+
 func TestDescribeOutputTypes(t *testing.T) {
 	out := DescribeOutput{
 		Name:          "riffle",
