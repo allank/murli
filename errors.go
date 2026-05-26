@@ -81,7 +81,10 @@ func (w *Writer) WriteError(err *AgentError) {
 			fmt.Fprintf(w.stderr, "Hint:  %s\n", err.Suggestion)
 		}
 	} else {
-		toWrite := *err // copy so we don't mutate the caller's struct
+		toWrite := *err // copy struct so we don't mutate the caller's
+		if len(err.ValidValues) > 0 {
+			toWrite.ValidValues = append([]string(nil), err.ValidValues...)
+		}
 		toWrite.SchemaVersion = SchemaVersion
 		toWrite.ToolVersion = ToolVersion
 		enc := json.NewEncoder(w.stderr)
@@ -93,7 +96,7 @@ func (w *Writer) WriteError(err *AgentError) {
 }
 
 // Temporary placeholders — SchemaVersion and ToolVersion will be moved to
-// version.go in Task 3. Remove these two lines when version.go is created.
+// version.go in Task 3. Remove these lines when version.go is created.
 const SchemaVersion = "0.2"
 
 var ToolVersion = ""

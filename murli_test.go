@@ -115,6 +115,13 @@ func TestErrorWriter(t *testing.T) {
 		if resp.Code != ExitUserError || resp.ErrorType != "invalid_parameter" || resp.Message != "The provided value is out of bounds" || !resp.Recoverable {
 			t.Errorf("mismatched structured error payload: %+v", resp)
 		}
+		if resp.SchemaVersion != SchemaVersion {
+			t.Errorf("SchemaVersion: want %q, got %q", SchemaVersion, resp.SchemaVersion)
+		}
+		// ToolVersion is "" (default), so with omitempty it should NOT appear in JSON
+		if resp.ToolVersion != "" {
+			t.Errorf("ToolVersion: want empty, got %q", resp.ToolVersion)
+		}
 	})
 }
 
