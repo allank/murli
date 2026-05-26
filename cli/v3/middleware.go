@@ -58,7 +58,7 @@ func wrapCommands(cmds []*cli.Command, root *cli.Command) {
 					Code:        murli.ExitUserError,
 					ErrorType:   "confirmation_required",
 					Message:     "This command mutates state and requires explicit confirmation.",
-					Suggestion:  "Re-run with --force to confirm the operation.",
+					Suggestion:  "Mutation requires confirmation. Use a TTY (interactive terminal) to run this command, or wait for --force support in a future release.",
 					Recoverable: true,
 				})
 				return nil

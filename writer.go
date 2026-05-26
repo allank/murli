@@ -14,7 +14,7 @@ type Writer struct {
 	stdout io.Writer
 	stderr io.Writer
 	isTTY  bool
-	force  bool
+	force  bool   // reserved: will back --force/--yes bypass of the non-interactive guard (v0.4)
 	logger *Logger
 }
 
@@ -74,8 +74,10 @@ func (w *Writer) WriteSuccess(humanText string, jsonPayload any) {
 }
 
 // WriteEvent writes a single minified JSON object to stdout on one line.
-// It is goroutine-safe. In TTY mode it is a no-op (events are machine-only).
-// Use for streaming intermediate results during long-running commands.
+// It is safe to call WriteEvent concurrently from multiple goroutines.
+// However, WriteSuccess and WriteError are not mutex-protected — call them only
+// after all WriteEvent goroutines have completed (e.g., after a sync.WaitGroup.Wait()).
+// In TTY mode WriteEvent is a no-op (events are machine-only).
 func (w *Writer) WriteEvent(v any) {
 	if w.isTTY {
 		return

@@ -12,7 +12,9 @@ type Metadata struct {
 	Idempotent bool `json:"idempotent"`
 
 	// Mutating marks commands that write, delete, or otherwise change state.
-	// When true and stdout is not a TTY, the adapter requires --force to proceed.
+	// When true and the output is not a TTY, the adapter rejects the command with a
+	// confirmation_required error to prevent accidental mutation in non-interactive mode.
+	// A bypass flag (--force / --yes) will be added in a future release.
 	Mutating bool `json:"mutating,omitempty"`
 
 	// Arguments defines explicit positional argument documentation.
