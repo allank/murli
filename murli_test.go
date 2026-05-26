@@ -781,3 +781,124 @@ func TestANSIStrippingInTTYMode(t *testing.T) {
 		t.Errorf("expected ANSI preserved in TTY mode, got: %q", stderr.String())
 	}
 }
+
+func TestOutputFormatJSON(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := NewWriter(buf, &bytes.Buffer{}, false, WithOutputFormat(OutputFormatJSON))
+	w.WriteSuccess("done", map[string]any{"x": 1})
+
+	var env map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("not JSON: %v\nraw: %s", err, buf.String())
+	}
+	if env["status"] != "ok" {
+		t.Errorf("status: %v", env["status"])
+	}
+	// JSON format should be pretty-printed (has indentation)
+	if !strings.Contains(buf.String(), "\n") {
+		t.Error("OutputFormatJSON should produce pretty-printed (multi-line) JSON")
+	}
+}
+
+func TestOutputFormatText(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := NewWriter(buf, &bytes.Buffer{}, false, WithOutputFormat(OutputFormatText))
+	w.WriteSuccess("hello world", nil)
+	if strings.TrimSpace(buf.String()) != "hello world" {
+		t.Errorf("expected plain text, got: %q", buf.String())
+	}
+}
+
+func TestOutputFormatNDJSON(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := NewWriter(buf, &bytes.Buffer{}, false, WithOutputFormat(OutputFormatNDJSON))
+	w.WriteSuccess("done", map[string]any{"x": 1})
+
+	line := strings.TrimSpace(buf.String())
+	// Must be a single line
+	if strings.Contains(line, "\n") {
+		t.Errorf("ndjson must be single line, got: %q", line)
+	}
+	var env map[string]any
+	if err := json.Unmarshal([]byte(line), &env); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if env["status"] != "ok" {
+		t.Errorf("status: %v", env["status"])
+	}
+}
+
+func TestOutputFormatYAML(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := NewWriter(buf, &bytes.Buffer{}, false, WithOutputFormat(OutputFormatYAML))
+	w.WriteSuccess("done", map[string]any{"x": 1})
+
+	got := buf.String()
+	if !strings.Contains(got, "status: ok") {
+		t.Errorf("expected YAML with 'status: ok', got: %q", got)
+	}
+}
+
+func TestProtocolVersion01OmitsVersionFields(t *testing.T) {
+	stderr := &bytes.Buffer{}
+	var capturedCode int
+	origExit := ExitFunc
+	ExitFunc = func(code int) { capturedCode = code }
+	defer func() { ExitFunc = origExit }()
+
+	w := NewWriter(&bytes.Buffer{}, stderr, false, WithProtocolVersion("0.1"))
+	w.WriteError(&AgentError{Code: ExitUserError, ErrorType: "test", Message: "oops", Recoverable: true})
+
+	var env map[string]any
+	if err := json.Unmarshal(stderr.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, stderr.String())
+	}
+	if _, present := env["schema_version"]; present {
+		t.Errorf("schema_version must be absent in protocol 0.1, got: %v", env["schema_version"])
+	}
+	if _, present := env["tool_version"]; present {
+		t.Errorf("tool_version must be absent in protocol 0.1")
+	}
+	_ = capturedCode
+}
+
+func TestProtocolVersion02IncludesSchemaVersion(t *testing.T) {
+	stderr := &bytes.Buffer{}
+	var capturedCode int
+	origExit := ExitFunc
+	ExitFunc = func(code int) { capturedCode = code }
+	defer func() { ExitFunc = origExit }()
+
+	w := NewWriter(&bytes.Buffer{}, stderr, false, WithProtocolVersion("0.2"))
+	w.WriteError(&AgentError{Code: ExitUserError, ErrorType: "test", Message: "oops", Recoverable: true})
+
+	var env map[string]any
+	if err := json.Unmarshal(stderr.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, stderr.String())
+	}
+	if env["schema_version"] != SchemaVersion {
+		t.Errorf("schema_version must be present in protocol 0.2, got: %v", env["schema_version"])
+	}
+	_ = capturedCode
+}
+
+func TestProtocolVersionDefaultIs02(t *testing.T) {
+	w := NewWriter(&bytes.Buffer{}, &bytes.Buffer{}, false)
+	if w.ProtocolVersion() != "0.2" {
+		t.Errorf("default protocol version must be 0.2, got: %q", w.ProtocolVersion())
+	}
+}
+
+func TestSuccessEnvelopeWithProtocol01(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := NewWriter(buf, &bytes.Buffer{}, false, WithProtocolVersion("0.1"))
+	w.WriteSuccess("done", map[string]any{"x": 1})
+
+	var env map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("not JSON: %v\nraw: %s", err, buf.String())
+	}
+	if _, present := env["schema_version"]; present {
+		t.Errorf("schema_version must be absent in protocol 0.1 success envelope")
+	}
+}

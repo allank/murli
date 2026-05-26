@@ -2,6 +2,7 @@ package cobra
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/allank/murli"
 	gocobra "github.com/spf13/cobra"
@@ -31,6 +32,12 @@ func Enable(rootCmd *gocobra.Command) {
 	}
 	if rootCmd.PersistentFlags().Lookup("agent") == nil {
 		rootCmd.PersistentFlags().Bool("agent", false, "Force agent-optimized JSON mode")
+	}
+	if rootCmd.PersistentFlags().Lookup("output") == nil {
+		rootCmd.PersistentFlags().String("output", "", "Output format: json|ndjson|yaml|text")
+	}
+	if rootCmd.PersistentFlags().Lookup("protocol-version") == nil {
+		rootCmd.PersistentFlags().String("protocol-version", "", "Protocol version for envelope shaping (0.1|0.2)")
 	}
 	wrapCommands(rootCmd)
 }
@@ -70,6 +77,28 @@ func wrapCommands(cmd *gocobra.Command) {
 		}
 
 		w := NewWriter(c)
+
+		// Protocol-version validation.
+		if pv, _ := c.Flags().GetString("protocol-version"); pv != "" {
+			valid := false
+			for _, v := range murli.ValidProtocolVersions {
+				if pv == v {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				w.WriteError(&murli.AgentError{
+					Code:        murli.ExitUserError,
+					ErrorType:   "invalid_protocol_version",
+					Message:     fmt.Sprintf("unknown --protocol-version %q", pv),
+					Suggestion:  "Use --protocol-version 0.1 or --protocol-version 0.2",
+					Recoverable: true,
+					ValidValues: murli.ValidProtocolVersions,
+				})
+				return nil
+			}
+		}
 
 		// Non-interactive guard: mutating commands must not block waiting for input.
 		if meta := cobraMetadata(c); meta.Mutating && !w.IsTTY() {

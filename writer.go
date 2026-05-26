@@ -6,27 +6,83 @@ import (
 	"io"
 	"os"
 	"sync"
+
+	"gopkg.in/yaml.v3"
 )
 
-// Writer handles dynamic output routing based on terminal presence and agent flags.
+// OutputFormat controls the serialization format of WriteSuccess.
+type OutputFormat string
+
+const (
+	// OutputFormatDefault is unset — format is determined by TTY detection.
+	OutputFormatDefault OutputFormat = ""
+	// OutputFormatJSON writes a pretty-printed JSON envelope to stdout.
+	OutputFormatJSON OutputFormat = "json"
+	// OutputFormatNDJSON writes a minified single-line JSON envelope to stdout.
+	OutputFormatNDJSON OutputFormat = "ndjson"
+	// OutputFormatYAML writes a YAML-encoded envelope to stdout.
+	OutputFormatYAML OutputFormat = "yaml"
+	// OutputFormatText writes human-readable plain text to stdout (same as TTY mode).
+	OutputFormatText OutputFormat = "text"
+)
+
+// ValidOutputFormats lists the accepted --output values.
+var ValidOutputFormats = []string{"json", "ndjson", "yaml", "text"}
+
+// ValidProtocolVersions lists the accepted --protocol-version values.
+var ValidProtocolVersions = []string{"0.1", "0.2"}
+
+// WriterOption is a functional option for NewWriter.
+type WriterOption func(*Writer)
+
+// WithOutputFormat sets the explicit output format, overriding TTY auto-detection.
+func WithOutputFormat(f OutputFormat) WriterOption {
+	return func(w *Writer) {
+		w.outputFormat = f
+	}
+}
+
+// WithProtocolVersion sets the protocol version for envelope shaping.
+// Valid values: "0.1", "0.2". Empty string defaults to "0.2" (current).
+func WithProtocolVersion(v string) WriterOption {
+	return func(w *Writer) {
+		w.protocolVersion = v
+	}
+}
+
+// Writer handles dynamic output routing based on terminal presence, agent flags,
+// explicit output format, and negotiated protocol version.
 type Writer struct {
-	mu     sync.Mutex
-	stdout io.Writer
-	stderr io.Writer
-	isTTY  bool
-	force  bool   // reserved: will back --force/--yes bypass of the non-interactive guard (v0.4)
-	logger *Logger
+	mu              sync.Mutex
+	stdout          io.Writer
+	stderr          io.Writer
+	isTTY           bool
+	outputFormat    OutputFormat
+	protocolVersion string
+	force           bool // reserved: will back --force/--yes bypass of the non-interactive guard (v0.4)
+	logger          *Logger
 }
 
 // NewWriter returns a configured output writer.
 // Set agentMode true to force JSON output regardless of TTY state.
-func NewWriter(stdout, stderr io.Writer, agentMode bool) *Writer {
+// Pass WriterOption values to set OutputFormat or ProtocolVersion.
+func NewWriter(stdout, stderr io.Writer, agentMode bool, opts ...WriterOption) *Writer {
 	isTTY := isTerminal(stdout) && !agentMode
 	w := &Writer{
 		stdout: stdout,
 		stderr: stderr,
 		isTTY:  isTTY,
 		force:  agentMode,
+	}
+	for _, opt := range opts {
+		opt(w)
+	}
+	// Explicit format overrides isTTY routing.
+	switch w.outputFormat {
+	case OutputFormatText:
+		w.isTTY = true
+	case OutputFormatJSON, OutputFormatNDJSON, OutputFormatYAML:
+		w.isTTY = false
 	}
 	w.logger = NewLogger(stderr, w.isTTY)
 	return w
@@ -35,6 +91,19 @@ func NewWriter(stdout, stderr io.Writer, agentMode bool) *Writer {
 // IsTTY returns true if the writer is in human (TTY) mode.
 func (w *Writer) IsTTY() bool {
 	return w.isTTY
+}
+
+// Format returns the explicit output format (may be OutputFormatDefault).
+func (w *Writer) Format() OutputFormat {
+	return w.outputFormat
+}
+
+// ProtocolVersion returns the negotiated protocol version (empty string = "0.2").
+func (w *Writer) ProtocolVersion() string {
+	if w.protocolVersion == "" {
+		return "0.2"
+	}
+	return w.protocolVersion
 }
 
 // Log writes a message to stderr, deduplicating consecutive duplicates in agent mode.
@@ -52,25 +121,53 @@ func (w *Writer) Flush() {
 	w.logger.Flush()
 }
 
-// WriteSuccess writes to stdout. TTY mode writes humanText; agent mode writes a
-// JSON envelope with status, schema_version, tool_version (if set), and result.
+// WriteSuccess writes to stdout. Format depends on outputFormat and isTTY:
+//   - TTY or OutputFormatText: humanText plain line
+//   - OutputFormatNDJSON: single minified JSON line
+//   - OutputFormatYAML: YAML-encoded envelope
+//   - OutputFormatJSON or default agent mode: pretty-printed JSON envelope
 func (w *Writer) WriteSuccess(humanText string, jsonPayload any) {
-	if w.isTTY {
+	switch {
+	case w.outputFormat == OutputFormatText || (w.outputFormat == OutputFormatDefault && w.isTTY):
 		fmt.Fprintln(w.stdout, humanText)
-	} else {
-		envelope := map[string]any{
-			"status":         "ok",
-			"schema_version": SchemaVersion,
-			"result":         jsonPayload,
+
+	case w.outputFormat == OutputFormatNDJSON:
+		envelope := w.buildSuccessEnvelope(jsonPayload)
+		data, err := json.Marshal(envelope)
+		if err != nil {
+			return
 		}
-		if ToolVersion != "" {
-			envelope["tool_version"] = ToolVersion
-		}
+		fmt.Fprintf(w.stdout, "%s\n", data)
+
+	case w.outputFormat == OutputFormatYAML:
+		envelope := w.buildSuccessEnvelope(jsonPayload)
+		enc := yaml.NewEncoder(w.stdout)
+		enc.SetIndent(2)
+		_ = enc.Encode(envelope)
+
+	default: // OutputFormatJSON or default agent mode
+		envelope := w.buildSuccessEnvelope(jsonPayload)
 		enc := json.NewEncoder(w.stdout)
 		enc.SetIndent("", "  ")
 		enc.SetEscapeHTML(false)
 		_ = enc.Encode(envelope)
 	}
+}
+
+// buildSuccessEnvelope constructs the success envelope map,
+// respecting the negotiated protocol version.
+func (w *Writer) buildSuccessEnvelope(jsonPayload any) map[string]any {
+	envelope := map[string]any{
+		"status": "ok",
+		"result": jsonPayload,
+	}
+	if w.ProtocolVersion() != "0.1" {
+		envelope["schema_version"] = SchemaVersion
+		if ToolVersion != "" {
+			envelope["tool_version"] = ToolVersion
+		}
+	}
+	return envelope
 }
 
 // WriteEvent writes a single minified JSON object to stdout on one line.
@@ -103,7 +200,7 @@ type ProgressEvent struct {
 }
 
 // WriteProgress emits a structured progress event to stderr.
-// Agent mode: minified JSON on one line (via json.Marshal, consistent with WriteEvent).
+// Agent mode: minified JSON on one line (consistent with WriteEvent).
 // TTY mode: formatted human-readable line with carriage return to overwrite.
 func (w *Writer) WriteProgress(evt ProgressEvent) {
 	if w.isTTY {

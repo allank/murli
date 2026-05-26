@@ -2,7 +2,7 @@ package cli
 
 import (
 	"context"
-	"io"
+	"fmt"
 	"os"
 
 	"github.com/allank/murli"
@@ -39,6 +39,8 @@ func wrapCommands(cmds []*cli.Command, root *cli.Command) {
 		cmd.Flags = append(cmd.Flags,
 			&cli.BoolFlag{Name: "schema", Usage: "Output agent-optimized JSON schema"},
 			&cli.BoolFlag{Name: "agent", Usage: "Force agent-optimized JSON mode"},
+			&cli.StringFlag{Name: "output", Usage: "Output format: json|ndjson|yaml|text"},
+			&cli.StringFlag{Name: "protocol-version", Usage: "Protocol version for envelope shaping (0.1|0.2)"},
 		)
 
 		originalAction := cmd.Action
@@ -51,6 +53,28 @@ func wrapCommands(cmds []*cli.Command, root *cli.Command) {
 			}
 
 			w := NewWriter(c)
+
+			// Protocol-version validation.
+			if pv := c.String("protocol-version"); pv != "" {
+				valid := false
+				for _, v := range murli.ValidProtocolVersions {
+					if pv == v {
+						valid = true
+						break
+					}
+				}
+				if !valid {
+					w.WriteError(&murli.AgentError{
+						Code:        murli.ExitUserError,
+						ErrorType:   "invalid_protocol_version",
+						Message:     fmt.Sprintf("unknown --protocol-version %q", pv),
+						Suggestion:  "Use --protocol-version 0.1 or --protocol-version 0.2",
+						Recoverable: true,
+						ValidValues: murli.ValidProtocolVersions,
+					})
+					return nil
+				}
+			}
 
 			// Non-interactive guard.
 			if meta := metadataFor(currentCmd); meta.Mutating && !w.IsTTY() {
@@ -103,9 +127,3 @@ func rootWriter(app *cli.Command) *murli.Writer {
 	)
 }
 
-func writerOrDefault(w io.Writer, fallback io.Writer) io.Writer {
-	if w != nil {
-		return w
-	}
-	return fallback
-}
