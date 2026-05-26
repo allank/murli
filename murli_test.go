@@ -236,8 +236,15 @@ func TestLogDeduplication(t *testing.T) {
 		if first["msg"] != "Hello" {
 			t.Errorf("first msg: want %q, got %v", "Hello", first["msg"])
 		}
-		if first["repeated"].(float64) != 2 {
-			t.Errorf("repeated: want 2, got %v", first["repeated"])
+		rep, ok := first["repeated"].(float64)
+		if !ok {
+			t.Fatal("repeated field missing or wrong type in first entry")
+		}
+		if rep != 2 {
+			t.Errorf("repeated: want 2, got %v", rep)
+		}
+		if first["level"] != "info" {
+			t.Errorf("level: want %q, got %v", "info", first["level"])
 		}
 		if second["msg"] != "World" {
 			t.Errorf("second msg: want %q, got %v", "World", second["msg"])
@@ -264,11 +271,28 @@ func TestLogDeduplication(t *testing.T) {
 		if first["msg"] != "Loading config" {
 			t.Errorf("first msg: want %q, got %v", "Loading config", first["msg"])
 		}
-		if first["repeated"].(float64) != 1 {
-			t.Errorf("repeated: want 1, got %v", first["repeated"])
+		rep, ok := first["repeated"].(float64)
+		if !ok {
+			t.Fatal("repeated field missing or wrong type in first entry")
+		}
+		if rep != 1 {
+			t.Errorf("repeated: want 1, got %v", rep)
 		}
 		if first["level"] != "progress" {
 			t.Errorf("level: want %q, got %v", "progress", first["level"])
+		}
+		var second map[string]any
+		if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
+			t.Fatalf("line 1 not valid JSON: %v — %q", err, lines[1])
+		}
+		if second["msg"] != "Connecting db" {
+			t.Errorf("second msg: want %q, got %v", "Connecting db", second["msg"])
+		}
+		if second["level"] != "progress" {
+			t.Errorf("second level: want %q, got %v", "progress", second["level"])
+		}
+		if _, present := second["repeated"]; present {
+			t.Error("second entry must not have a 'repeated' field")
 		}
 	})
 }
@@ -287,8 +311,10 @@ func TestLoggerTimestampFormat(t *testing.T) {
 	if !ok || ts == "" {
 		t.Errorf("ts field missing or not a string: %v", entry["ts"])
 	}
-	if _, err := time.Parse(time.RFC3339, ts); err != nil {
-		t.Errorf("ts %q is not RFC3339: %v", ts, err)
+	_, err1 := time.Parse(time.RFC3339, ts)
+	_, err2 := time.Parse(time.RFC3339Nano, ts)
+	if err1 != nil && err2 != nil {
+		t.Errorf("ts %q is not RFC3339 or RFC3339Nano: %v / %v", ts, err1, err2)
 	}
 }
 

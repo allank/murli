@@ -14,6 +14,7 @@ import (
 type Logger struct {
 	writer     io.Writer
 	lastLine   string
+	loggedAt   time.Time
 	dupCount   int
 	isTTY      bool
 	isProgress bool
@@ -36,6 +37,7 @@ func (l *Logger) Log(line string) {
 	}
 	l.Flush()
 	l.lastLine = line
+	l.loggedAt = time.Now().UTC()
 	l.dupCount = 0
 	l.isProgress = false
 }
@@ -54,6 +56,7 @@ func (l *Logger) LogProgress(line string) {
 	}
 	l.Flush()
 	l.lastLine = line
+	l.loggedAt = time.Now().UTC()
 	l.dupCount = 0
 	l.isProgress = true
 }
@@ -68,15 +71,16 @@ func (l *Logger) Flush() {
 		level = "progress"
 	}
 	entry := map[string]any{
-		"ts":    time.Now().UTC().Format(time.RFC3339),
+		"ts":    l.loggedAt.Format(time.RFC3339Nano),
 		"level": level,
 		"msg":   l.lastLine,
 	}
 	if l.dupCount > 0 {
 		entry["repeated"] = l.dupCount
 	}
-	data, _ := json.Marshal(entry)
-	fmt.Fprintf(l.writer, "%s\n", data)
+	enc := json.NewEncoder(l.writer)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(entry)
 	l.lastLine = ""
 	l.dupCount = 0
 	l.isProgress = false
