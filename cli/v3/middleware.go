@@ -9,7 +9,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// Run enables murli on app and calls app.Run. Top-level errors are formatted before exit.
+// Run enables murli on app and calls app.Run.
 func Run(app *cli.Command, args []string) error {
 	Wrap(app)
 	if err := app.Run(context.Background(), args); err != nil {
@@ -51,6 +51,18 @@ func wrapCommands(cmds []*cli.Command, root *cli.Command) {
 			}
 
 			w := NewWriter(c)
+
+			// Non-interactive guard.
+			if meta := metadataFor(currentCmd); meta.Mutating && !w.IsTTY() {
+				w.WriteError(&murli.AgentError{
+					Code:        murli.ExitUserError,
+					ErrorType:   "confirmation_required",
+					Message:     "This command mutates state and requires explicit confirmation.",
+					Suggestion:  "Re-run with --force to confirm the operation.",
+					Recoverable: true,
+				})
+				return nil
+			}
 
 			var runErr error
 			if originalAction != nil {

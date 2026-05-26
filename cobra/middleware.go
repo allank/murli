@@ -1,12 +1,13 @@
 package cobra
 
 import (
+	"encoding/json"
+
 	"github.com/allank/murli"
 	gocobra "github.com/spf13/cobra"
 )
 
-// Execute is a drop-in replacement for rootCmd.Execute() that enables murli and handles
-// top-level errors.
+// Execute is a drop-in replacement for rootCmd.Execute().
 func Execute(rootCmd *gocobra.Command) error {
 	Enable(rootCmd)
 	err := rootCmd.Execute()
@@ -68,6 +69,20 @@ func wrapCommands(cmd *gocobra.Command) {
 			return EmitSchema(c)
 		}
 
+		w := NewWriter(c)
+
+		// Non-interactive guard: mutating commands must not block waiting for input.
+		if meta := cobraMetadata(c); meta.Mutating && !w.IsTTY() {
+			w.WriteError(&murli.AgentError{
+				Code:        murli.ExitUserError,
+				ErrorType:   "confirmation_required",
+				Message:     "This command mutates state and requires explicit confirmation.",
+				Suggestion:  "Re-run with --force to confirm the operation.",
+				Recoverable: true,
+			})
+			return nil
+		}
+
 		var runErr error
 		if originalRunE != nil {
 			runErr = originalRunE(c, args)
@@ -77,7 +92,6 @@ func wrapCommands(cmd *gocobra.Command) {
 			return c.Help()
 		}
 
-		w := NewWriter(c)
 		w.Flush()
 
 		if runErr != nil {
@@ -102,4 +116,18 @@ func wrapCommands(cmd *gocobra.Command) {
 	for _, child := range cmd.Commands() {
 		wrapCommands(child)
 	}
+}
+
+// cobraMetadata extracts murli.Metadata from a command's annotations map.
+func cobraMetadata(cmd *gocobra.Command) murli.Metadata {
+	if cmd.Annotations == nil {
+		return murli.Metadata{}
+	}
+	raw, ok := cmd.Annotations["agentcobra"]
+	if !ok {
+		return murli.Metadata{}
+	}
+	var meta murli.Metadata
+	_ = json.Unmarshal([]byte(raw), &meta)
+	return meta
 }

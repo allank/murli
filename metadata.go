@@ -11,6 +11,10 @@ type Metadata struct {
 	// Idempotent specifies if the command is safe to re-run on failure.
 	Idempotent bool `json:"idempotent"`
 
+	// Mutating marks commands that write, delete, or otherwise change state.
+	// When true and stdout is not a TTY, the adapter requires --force to proceed.
+	Mutating bool `json:"mutating,omitempty"`
+
 	// Arguments defines explicit positional argument documentation.
 	Arguments []ArgumentMetadata `json:"arguments,omitempty"`
 

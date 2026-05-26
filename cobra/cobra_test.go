@@ -94,6 +94,62 @@ func TestSchemaGeneration(t *testing.T) {
 	}
 }
 
+func TestMutatingGuardBlocksInAgentMode(t *testing.T) {
+	var capturedExit int
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = func(code int) {} }()
+
+	capturedExit = -999
+	errBuf := &bytes.Buffer{}
+
+	cmd := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete a resource",
+		RunE: func(c *cobra.Command, args []string) error {
+			t.Error("RunE must not be called when guard fires")
+			return nil
+		},
+	}
+	murliCobra.Annotate(cmd, murli.Metadata{
+		Mutating: true,
+	})
+	murliCobra.Enable(cmd)
+	cmd.SetErr(errBuf)
+	_ = cmd.Execute()
+
+	if capturedExit != murli.ExitUserError {
+		t.Errorf("exit code: want %d, got %d", murli.ExitUserError, capturedExit)
+	}
+	var resp murli.AgentError
+	if err := json.Unmarshal(errBuf.Bytes(), &resp); err != nil {
+		t.Fatalf("error envelope not valid JSON: %v\nOutput: %s", err, errBuf.String())
+	}
+	if resp.ErrorType != "confirmation_required" {
+		t.Errorf("ErrorType: want %q, got %q", "confirmation_required", resp.ErrorType)
+	}
+	if !resp.Recoverable {
+		t.Error("confirmation_required must be Recoverable = true")
+	}
+}
+
+func TestMutatingGuardAllowsNonMutating(t *testing.T) {
+	ran := false
+	cmd := &cobra.Command{
+		Use:  "list",
+		RunE: func(c *cobra.Command, args []string) error { ran = true; return nil },
+	}
+	murliCobra.Annotate(cmd, murli.Metadata{Mutating: false})
+	murliCobra.Enable(cmd)
+	outBuf, errBuf := &bytes.Buffer{}, &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetErr(errBuf)
+	_ = cmd.Execute()
+
+	if !ran {
+		t.Error("non-mutating command RunE must run in agent mode")
+	}
+}
+
 func TestMiddlewareInterception(t *testing.T) {
 	var capturedExit int
 	murli.ExitFunc = func(code int) { capturedExit = code }

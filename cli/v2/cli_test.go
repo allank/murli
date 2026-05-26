@@ -153,6 +153,43 @@ func TestV2MiddlewarePassesThroughAgentError(t *testing.T) {
 	}
 }
 
+func TestV2MutatingGuardBlocksInAgentMode(t *testing.T) {
+	var capturedExit int
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = func(code int) {} }()
+
+	capturedExit = -999
+	errBuf := &bytes.Buffer{}
+
+	app := &cli.App{
+		Name:      "testapp",
+		ErrWriter: errBuf,
+		Commands: []*cli.Command{
+			{
+				Name: "delete",
+				Action: func(ctx *cli.Context) error {
+					t.Error("Action must not be called when guard fires")
+					return nil
+				},
+			},
+		},
+	}
+	murliCLI.Annotate(app.Commands[0], murli.Metadata{Mutating: true})
+	murliCLI.Wrap(app)
+	_ = app.Run([]string{"testapp", "delete"})
+
+	if capturedExit != murli.ExitUserError {
+		t.Errorf("exit code: want %d, got %d", murli.ExitUserError, capturedExit)
+	}
+	var resp murli.AgentError
+	if err := json.Unmarshal(errBuf.Bytes(), &resp); err != nil {
+		t.Fatalf("error envelope not valid JSON: %v\nOutput: %s", err, errBuf.String())
+	}
+	if resp.ErrorType != "confirmation_required" {
+		t.Errorf("ErrorType: want %q, got %q", "confirmation_required", resp.ErrorType)
+	}
+}
+
 func TestV2SchemaFlag(t *testing.T) {
 	buf := &bytes.Buffer{}
 
