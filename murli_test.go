@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestSuccessWriter verifies success outputs in TTY (human) vs non-TTY (agent) modes.
@@ -203,49 +204,92 @@ func TestLogDeduplication(t *testing.T) {
 	t.Run("TTY mode overwrites", func(t *testing.T) {
 		buf := &bytes.Buffer{}
 		l := NewLogger(buf, true)
-
 		l.LogProgress("Task A: 10%")
 		l.LogProgress("Task A: 20%")
-
 		got := buf.String()
-		// TTY uses carriage returns and clear-line codes
 		if !strings.Contains(got, "\r\033[KTask A: 10%") || !strings.Contains(got, "\r\033[KTask A: 20%") {
 			t.Errorf("missing TTY overwrite sequences: %q", got)
 		}
 	})
 
-	t.Run("Agent mode log collapsing", func(t *testing.T) {
+	t.Run("Agent mode log deduplication emits NDJSON", func(t *testing.T) {
 		buf := &bytes.Buffer{}
 		l := NewLogger(buf, false)
-
 		l.Log("Hello")
 		l.Log("Hello")
 		l.Log("Hello")
 		l.Log("World")
 		l.Flush()
 
-		got := buf.String()
-		want := "Hello (repeated 2 times)\nWorld\n"
-		if got != want {
-			t.Errorf("expected %q, got %q", want, got)
+		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("expected 2 log lines, got %d:\n%s", len(lines), buf.String())
+		}
+
+		var first, second map[string]any
+		if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+			t.Fatalf("line 0 not valid JSON: %v — %q", err, lines[0])
+		}
+		if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
+			t.Fatalf("line 1 not valid JSON: %v — %q", err, lines[1])
+		}
+		if first["msg"] != "Hello" {
+			t.Errorf("first msg: want %q, got %v", "Hello", first["msg"])
+		}
+		if first["repeated"].(float64) != 2 {
+			t.Errorf("repeated: want 2, got %v", first["repeated"])
+		}
+		if second["msg"] != "World" {
+			t.Errorf("second msg: want %q, got %v", "World", second["msg"])
 		}
 	})
 
-	t.Run("Agent mode progress collapsing", func(t *testing.T) {
+	t.Run("Agent mode progress deduplication emits NDJSON", func(t *testing.T) {
 		buf := &bytes.Buffer{}
 		l := NewLogger(buf, false)
-
 		l.LogProgress("Loading config")
 		l.LogProgress("Loading config")
 		l.LogProgress("Connecting db")
 		l.Flush()
 
-		got := buf.String()
-		want := "Loading config (repeated 1 time, progress)\nConnecting db\n"
-		if got != want {
-			t.Errorf("expected %q, got %q", want, got)
+		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("expected 2 log lines, got %d:\n%s", len(lines), buf.String())
+		}
+
+		var first map[string]any
+		if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+			t.Fatalf("line 0 not valid JSON: %v — %q", err, lines[0])
+		}
+		if first["msg"] != "Loading config" {
+			t.Errorf("first msg: want %q, got %v", "Loading config", first["msg"])
+		}
+		if first["repeated"].(float64) != 1 {
+			t.Errorf("repeated: want 1, got %v", first["repeated"])
+		}
+		if first["level"] != "progress" {
+			t.Errorf("level: want %q, got %v", "progress", first["level"])
 		}
 	})
+}
+
+func TestLoggerTimestampFormat(t *testing.T) {
+	buf := &bytes.Buffer{}
+	l := NewLogger(buf, false)
+	l.Log("hello world")
+	l.Flush()
+
+	var entry map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+		t.Fatalf("not valid JSON: %v — %q", err, buf.String())
+	}
+	ts, ok := entry["ts"].(string)
+	if !ok || ts == "" {
+		t.Errorf("ts field missing or not a string: %v", entry["ts"])
+	}
+	if _, err := time.Parse(time.RFC3339, ts); err != nil {
+		t.Errorf("ts %q is not RFC3339: %v", ts, err)
+	}
 }
 
 func TestVersionInSuccessEnvelope(t *testing.T) {
