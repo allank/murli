@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -363,6 +364,89 @@ func TestVersionInErrorEnvelope(t *testing.T) {
 	if got.ToolVersion != "2.0.0" {
 		t.Errorf("tool_version: want %q, got %q", "2.0.0", got.ToolVersion)
 	}
+}
+
+func TestWriteEvent(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := &Writer{stdout: buf, isTTY: false}
+
+	w.WriteEvent(map[string]any{"stage": "processing", "item": 1})
+	w.WriteEvent(map[string]any{"stage": "processing", "item": 2})
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 event lines, got %d:\n%s", len(lines), buf.String())
+	}
+
+	var evt map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &evt); err != nil {
+		t.Fatalf("line 0 not valid JSON: %v — %q", err, lines[0])
+	}
+	if evt["stage"] != "processing" {
+		t.Errorf("stage: want %q, got %v", "processing", evt["stage"])
+	}
+	if evt["item"].(float64) != 1 {
+		t.Errorf("item: want 1, got %v", evt["item"])
+	}
+}
+
+func TestWriteEventIsMinified(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := &Writer{stdout: buf, isTTY: false}
+	w.WriteEvent(map[string]any{"k": "v"})
+
+	line := strings.TrimSpace(buf.String())
+	if strings.Contains(line, "\n") {
+		t.Error("WriteEvent output must be a single line (minified JSON)")
+	}
+	if strings.Contains(line, "  ") {
+		t.Error("WriteEvent output must not contain indentation")
+	}
+}
+
+func TestWriteEventConcurrentSafe(t *testing.T) {
+	buf := &safeBuffer{}
+	w := &Writer{stdout: buf, isTTY: false}
+
+	done := make(chan struct{})
+	for i := 0; i < 10; i++ {
+		go func(n int) {
+			w.WriteEvent(map[string]any{"n": n})
+			done <- struct{}{}
+		}(i)
+	}
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 10 {
+		t.Errorf("expected 10 event lines, got %d", len(lines))
+	}
+	for i, line := range lines {
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			t.Errorf("line %d not valid JSON: %v — %q", i, err, line)
+		}
+	}
+}
+
+// safeBuffer is a bytes.Buffer protected by a mutex for concurrent test writes.
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (sb *safeBuffer) Write(p []byte) (int, error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Write(p)
+}
+
+func (sb *safeBuffer) String() string {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.String()
 }
 
 func TestAgentErrorExtendedFields(t *testing.T) {

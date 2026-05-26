@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 )
 
 // Writer handles dynamic output routing based on terminal presence and agent flags.
 type Writer struct {
+	mu     sync.Mutex
 	stdout io.Writer
 	stderr io.Writer
 	isTTY  bool
@@ -69,6 +71,22 @@ func (w *Writer) WriteSuccess(humanText string, jsonPayload any) {
 		enc.SetEscapeHTML(false)
 		_ = enc.Encode(envelope)
 	}
+}
+
+// WriteEvent writes a single minified JSON object to stdout on one line.
+// It is goroutine-safe. In TTY mode it is a no-op (events are machine-only).
+// Use for streaming intermediate results during long-running commands.
+func (w *Writer) WriteEvent(v any) {
+	if w.isTTY {
+		return
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	fmt.Fprintf(w.stdout, "%s\n", data)
 }
 
 // isTerminal returns true if the given writer is a character device (TTY).
