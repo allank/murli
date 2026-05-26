@@ -3,9 +3,12 @@ package cobra
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/allank/murli"
 	gocobra "github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // Execute is a drop-in replacement for rootCmd.Execute().
@@ -39,6 +42,13 @@ func Enable(rootCmd *gocobra.Command) {
 	if rootCmd.PersistentFlags().Lookup("protocol-version") == nil {
 		rootCmd.PersistentFlags().String("protocol-version", "", "Protocol version for envelope shaping (0.1|0.2)")
 	}
+	// Naming convention advisory: emit warnings in TTY mode only (developer feedback).
+	if isTTYWriter(rootCmd.OutOrStdout()) {
+		var cmdNames, flagNames []string
+		collectNames(rootCmd, &cmdNames, &flagNames)
+		murli.CheckConventions(cmdNames, flagNames, rootCmd.ErrOrStderr())
+	}
+
 	wrapCommands(rootCmd)
 }
 
@@ -100,6 +110,28 @@ func wrapCommands(cmd *gocobra.Command) {
 			}
 		}
 
+		// Output format validation.
+		if outFmt, _ := c.Flags().GetString("output"); outFmt != "" {
+			valid := false
+			for _, v := range murli.ValidOutputFormats {
+				if outFmt == v {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				w.WriteError(&murli.AgentError{
+					Code:        murli.ExitUserError,
+					ErrorType:   "invalid_output_format",
+					Message:     fmt.Sprintf("unknown --output value %q", outFmt),
+					Suggestion:  "Use --output json, ndjson, yaml, or text",
+					Recoverable: true,
+					ValidValues: murli.ValidOutputFormats,
+				})
+				return nil
+			}
+		}
+
 		// Non-interactive guard: mutating commands must not block waiting for input.
 		if meta := cobraMetadata(c); meta.Mutating && !w.IsTTY() {
 			w.WriteError(&murli.AgentError{
@@ -144,6 +176,26 @@ func wrapCommands(cmd *gocobra.Command) {
 
 	for _, child := range cmd.Commands() {
 		wrapCommands(child)
+	}
+}
+
+// isTTYWriter reports whether w is a character device (TTY).
+func isTTYWriter(w io.Writer) bool {
+	if f, ok := w.(*os.File); ok {
+		stat, _ := f.Stat()
+		return stat != nil && (stat.Mode()&os.ModeCharDevice) != 0
+	}
+	return false
+}
+
+// collectNames gathers all command names and flag names recursively from cmd.
+func collectNames(cmd *gocobra.Command, cmds, flags *[]string) {
+	*cmds = append(*cmds, cmd.Name())
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		*flags = append(*flags, f.Name)
+	})
+	for _, child := range cmd.Commands() {
+		collectNames(child, cmds, flags)
 	}
 }
 

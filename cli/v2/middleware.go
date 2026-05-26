@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/allank/murli"
@@ -31,6 +32,15 @@ func Run(app *cli.App, args []string) error {
 // Wrap injects --schema and --agent flags and wraps all command Actions.
 func Wrap(app *cli.App) {
 	wrapCommands(app.Commands, app)
+
+	// Naming convention advisory: collect names, emit warnings if TTY.
+	if isTTYWriter(writerOrDefault(app.Writer, os.Stdout)) {
+		var cmdNames, flagNames []string
+		for _, cmd := range app.Commands {
+			collectV2Names(cmd, &cmdNames, &flagNames)
+		}
+		murli.CheckConventions(cmdNames, flagNames, writerOrDefault(app.ErrWriter, os.Stderr))
+	}
 }
 
 func wrapCommands(cmds []*cli.Command, app *cli.App) {
@@ -115,6 +125,28 @@ func wrapCommands(cmds []*cli.Command, app *cli.App) {
 		if len(cmd.Subcommands) > 0 {
 			wrapCommands(cmd.Subcommands, app)
 		}
+	}
+}
+
+// isTTYWriter reports whether w is a character device (TTY).
+func isTTYWriter(w io.Writer) bool {
+	if f, ok := w.(*os.File); ok {
+		stat, _ := f.Stat()
+		return stat != nil && (stat.Mode()&os.ModeCharDevice) != 0
+	}
+	return false
+}
+
+// collectV2Names gathers all command names and flag names recursively from cmd.
+func collectV2Names(cmd *cli.Command, cmds, flags *[]string) {
+	*cmds = append(*cmds, cmd.Name)
+	for _, f := range cmd.Flags {
+		if names := f.Names(); len(names) > 0 {
+			*flags = append(*flags, names[0])
+		}
+	}
+	for _, sub := range cmd.Subcommands {
+		collectV2Names(sub, cmds, flags)
 	}
 }
 

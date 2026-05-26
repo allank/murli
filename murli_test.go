@@ -902,3 +902,42 @@ func TestSuccessEnvelopeWithProtocol01(t *testing.T) {
 		t.Errorf("schema_version must be absent in protocol 0.1 success envelope")
 	}
 }
+
+func TestCheckConventions_NoViolations(t *testing.T) {
+	var buf bytes.Buffer
+	n := CheckConventions([]string{"get", "list", "delete"}, []string{"force", "quiet"}, &buf)
+	if n != 0 {
+		t.Errorf("expected 0 warnings, got %d: %s", n, buf.String())
+	}
+}
+
+func TestCheckConventions_CommandViolation(t *testing.T) {
+	var buf bytes.Buffer
+	n := CheckConventions([]string{"fetch", "show-all"}, []string{}, &buf)
+	if n != 2 {
+		t.Errorf("expected 2 warnings, got %d", n)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "fetch") || !strings.Contains(got, "get") {
+		t.Errorf("expected advisory mentioning 'fetch' → 'get', got: %s", got)
+	}
+}
+
+func TestCheckConventions_FlagViolation(t *testing.T) {
+	var buf bytes.Buffer
+	n := CheckConventions([]string{}, []string{"format", "silent"}, &buf)
+	if n != 2 {
+		t.Errorf("expected 2 warnings, got %d", n)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "format") {
+		t.Errorf("expected advisory mentioning 'format', got: %s", got)
+	}
+}
+
+func TestCheckConventions_ConventionalVocabulary(t *testing.T) {
+	voc := ConventionalVocabulary()
+	if voc["vocabulary"] == nil {
+		t.Errorf("expected vocabulary map in ConventionalVocabulary()")
+	}
+}
