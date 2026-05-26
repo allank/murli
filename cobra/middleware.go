@@ -50,6 +50,39 @@ func Enable(rootCmd *gocobra.Command) {
 	}
 
 	wrapCommands(rootCmd)
+
+	// Auto-mount describe command if not already present.
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "describe" {
+			return // already mounted
+		}
+	}
+	describeCmd := &gocobra.Command{
+		Use:   "describe",
+		Short: "Print the full command tree and capabilities as a single JSON document",
+		RunE: func(cmd *gocobra.Command, args []string) error {
+			out := murli.DescribeOutput{
+				Name:          rootCmd.Name(),
+				Summary:       rootCmd.Short,
+				SchemaVersion: murli.SchemaVersion,
+				ToolVersion:   murli.ToolVersion,
+				Capabilities:  murli.DefaultCapabilities(),
+				Conventions:   murli.ConventionalVocabulary(),
+			}
+			for _, child := range rootCmd.Commands() {
+				if child.Hidden || child.Name() == "help" || child.Name() == "describe" {
+					continue
+				}
+				out.Commands = append(out.Commands, BuildDescribeTree(child))
+			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			enc.SetEscapeHTML(false)
+			_ = enc.Encode(out)
+			return nil
+		},
+	}
+	rootCmd.AddCommand(describeCmd)
 }
 
 func wrapCommands(cmd *gocobra.Command) {

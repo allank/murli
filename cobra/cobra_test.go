@@ -201,6 +201,78 @@ func TestMutatingGuardAllowsNonMutating(t *testing.T) {
 	}
 }
 
+func TestDescribeCommand(t *testing.T) {
+	root := &cobra.Command{Use: "riffle", Short: "Riffle semantic search"}
+	queryCmd := &cobra.Command{Use: "query <text>", Short: "Semantic query"}
+	deleteCmd := &cobra.Command{Use: "delete <id>", Short: "Delete index"}
+	root.AddCommand(queryCmd, deleteCmd)
+
+	murliCobra.Annotate(queryCmd, murli.Metadata{
+		AgentDescription: "Searches the semantic index.",
+		Idempotent:       true,
+	})
+	murliCobra.Annotate(deleteCmd, murli.Metadata{
+		AgentDescription: "Deletes an index.",
+		Mutating:         true,
+	})
+
+	murliCobra.Enable(root)
+
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	root.SetArgs([]string{"describe"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var out murli.DescribeOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, buf.String())
+	}
+
+	if out.Name != "riffle" {
+		t.Errorf("name: got %q, want %q", out.Name, "riffle")
+	}
+	if out.SchemaVersion == "" {
+		t.Error("schema_version must be present")
+	}
+	if !out.Capabilities.Streaming {
+		t.Error("capabilities.streaming must be true")
+	}
+	if len(out.Capabilities.OutputFormats) != 4 {
+		t.Errorf("output_formats: got %v", out.Capabilities.OutputFormats)
+	}
+	if len(out.Commands) < 2 {
+		t.Fatalf("expected at least 2 commands, got %d", len(out.Commands))
+	}
+
+	var queryFound, deleteFound bool
+	for _, cmd := range out.Commands {
+		if cmd.Name == "query" {
+			queryFound = true
+			if !cmd.Idempotent {
+				t.Error("query: expected Idempotent=true")
+			}
+		}
+		if cmd.Name == "delete" {
+			deleteFound = true
+			if !cmd.Mutating {
+				t.Error("delete: expected Mutating=true")
+			}
+		}
+	}
+	if !queryFound {
+		t.Error("query command not found in describe output")
+	}
+	if !deleteFound {
+		t.Error("delete command not found in describe output")
+	}
+
+	if out.Conventions == nil || len(out.Conventions.Vocabulary) == 0 {
+		t.Error("conventions.vocabulary must be present and non-empty")
+	}
+}
+
 func TestMiddlewareInterception(t *testing.T) {
 	var capturedExit int
 	murli.ExitFunc = func(code int) { capturedExit = code }

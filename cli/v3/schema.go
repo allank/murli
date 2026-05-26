@@ -121,6 +121,30 @@ func v3FlagUsage(f cli.Flag) string {
 	}
 }
 
+// BuildV3DescribeTree recursively builds the full DescribeCommandSchema for a v3 command.
+func BuildV3DescribeTree(cmd *cli.Command) murli.DescribeCommandSchema {
+	meta := metadataFor(cmd)
+	node := murli.DescribeCommandSchema{
+		Name:             cmd.Name,
+		Summary:          cmd.Usage,
+		WhenToUse:        meta.WhenToUse,
+		AgentDescription: meta.AgentDescription,
+		Idempotent:       meta.Idempotent,
+		Mutating:         meta.Mutating,
+		Returns:          meta.Returns,
+		Examples:         meta.Examples,
+		Arguments:        meta.Arguments,
+		Flags:            v3FlagSchemas(cmd.Flags, meta.FlagAnnotations),
+	}
+	for _, child := range cmd.Commands {
+		if child.Hidden || child.Name == "describe" {
+			continue
+		}
+		node.Subcommands = append(node.Subcommands, BuildV3DescribeTree(child))
+	}
+	return node
+}
+
 func v3SubcommandSchemas(cmds []*cli.Command) []murli.SubcommandSchema {
 	var list []murli.SubcommandSchema
 	for _, c := range cmds {

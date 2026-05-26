@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -41,6 +42,46 @@ func Wrap(app *cli.App) {
 		}
 		murli.CheckConventions(cmdNames, flagNames, writerOrDefault(app.ErrWriter, os.Stderr))
 	}
+
+	// Auto-mount describe command if not already present.
+	for _, c := range app.Commands {
+		if c.Name == "describe" {
+			return // already mounted
+		}
+	}
+	describeV2 := &cli.Command{
+		Name:  "describe",
+		Usage: "Print the full command tree and capabilities as a single JSON document",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "output", Usage: "Output format: json|ndjson|yaml|text"},
+			&cli.StringFlag{Name: "protocol-version", Usage: "Protocol version (0.1|0.2)"},
+		},
+		Action: func(ctx *cli.Context) error {
+			stdout := writerOrDefault(ctx.App.Writer, os.Stdout)
+			stderr := writerOrDefault(ctx.App.ErrWriter, os.Stderr)
+			out := murli.DescribeOutput{
+				Name:          ctx.App.Name,
+				Summary:       ctx.App.Usage,
+				SchemaVersion: murli.SchemaVersion,
+				ToolVersion:   murli.ToolVersion,
+				Capabilities:  murli.DefaultCapabilities(),
+				Conventions:   murli.ConventionalVocabulary(),
+			}
+			for _, cmd := range app.Commands {
+				if cmd.Hidden || cmd.Name == "describe" {
+					continue
+				}
+				out.Commands = append(out.Commands, BuildV2DescribeTree(cmd))
+			}
+			enc := json.NewEncoder(stdout)
+			enc.SetIndent("", "  ")
+			enc.SetEscapeHTML(false)
+			_ = enc.Encode(out)
+			_ = stderr
+			return nil
+		},
+	}
+	app.Commands = append(app.Commands, describeV2)
 }
 
 func wrapCommands(cmds []*cli.Command, app *cli.App) {

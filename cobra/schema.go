@@ -123,6 +123,38 @@ func getFlagSchemas(cmd *gocobra.Command, annotations map[string]murli.FlagAnnot
 	return list
 }
 
+// BuildDescribeTree recursively builds the full DescribeCommandSchema for cmd
+// and all its visible, non-system subcommands.
+func BuildDescribeTree(cmd *gocobra.Command) murli.DescribeCommandSchema {
+	var meta murli.Metadata
+	if cmd.Annotations != nil {
+		if raw, ok := cmd.Annotations["agentcobra"]; ok {
+			_ = json.Unmarshal([]byte(raw), &meta)
+		}
+	}
+
+	node := murli.DescribeCommandSchema{
+		Name:             cmd.Name(),
+		Summary:          cmd.Short,
+		WhenToUse:        meta.WhenToUse,
+		AgentDescription: meta.AgentDescription,
+		Idempotent:       meta.Idempotent,
+		Mutating:         meta.Mutating,
+		Returns:          meta.Returns,
+		Examples:         meta.Examples,
+		Arguments:        mergeArguments(cmd.Use, meta.Arguments),
+		Flags:            getFlagSchemas(cmd, meta.FlagAnnotations),
+	}
+
+	for _, child := range cmd.Commands() {
+		if child.Hidden || child.Name() == "help" || child.Name() == "describe" {
+			continue
+		}
+		node.Subcommands = append(node.Subcommands, BuildDescribeTree(child))
+	}
+	return node
+}
+
 func getSubcommandSchemas(cmd *gocobra.Command) []murli.SubcommandSchema {
 	var list []murli.SubcommandSchema
 	for _, sub := range cmd.Commands() {

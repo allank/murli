@@ -121,6 +121,30 @@ func v2FlagUsage(f cli.Flag) string {
 	}
 }
 
+// BuildV2DescribeTree recursively builds the full DescribeCommandSchema for a v2 command.
+func BuildV2DescribeTree(cmd *cli.Command) murli.DescribeCommandSchema {
+	meta := metadataFor(cmd)
+	node := murli.DescribeCommandSchema{
+		Name:             cmd.Name,
+		Summary:          cmd.Usage,
+		WhenToUse:        meta.WhenToUse,
+		AgentDescription: meta.AgentDescription,
+		Idempotent:       meta.Idempotent,
+		Mutating:         meta.Mutating,
+		Returns:          meta.Returns,
+		Examples:         meta.Examples,
+		Arguments:        meta.Arguments,
+		Flags:            v2FlagSchemas(cmd.Flags, meta.FlagAnnotations),
+	}
+	for _, child := range cmd.Subcommands {
+		if child.Hidden || child.Name == "describe" {
+			continue
+		}
+		node.Subcommands = append(node.Subcommands, BuildV2DescribeTree(child))
+	}
+	return node
+}
+
 func v2SubcommandSchemas(cmds []*cli.Command) []murli.SubcommandSchema {
 	var list []murli.SubcommandSchema
 	for _, c := range cmds {

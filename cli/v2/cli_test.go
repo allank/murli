@@ -240,6 +240,60 @@ func TestV2MutatingGuardBlocksInAgentMode(t *testing.T) {
 	}
 }
 
+func TestDescribeCommandV2(t *testing.T) {
+	queryCmd := &cli.Command{
+		Name:  "query",
+		Usage: "Semantic query",
+		Action: func(ctx *cli.Context) error { return nil },
+	}
+	murliCLI.Annotate(queryCmd, murli.Metadata{
+		AgentDescription: "Searches the semantic index.",
+		Idempotent:       true,
+	})
+
+	buf := &bytes.Buffer{}
+	app := &cli.App{
+		Name:     "riffle",
+		Usage:    "Riffle semantic search",
+		Writer:   buf,
+		Commands: []*cli.Command{queryCmd},
+	}
+
+	murliCLI.Wrap(app)
+
+	err := app.Run([]string{"riffle", "describe"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var out murli.DescribeOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, buf.String())
+	}
+
+	if out.Name != "riffle" {
+		t.Errorf("name: got %q, want %q", out.Name, "riffle")
+	}
+	if !out.Capabilities.Streaming {
+		t.Error("capabilities.streaming must be true")
+	}
+	if len(out.Commands) < 1 {
+		t.Fatalf("expected at least 1 command, got %d", len(out.Commands))
+	}
+	var queryFound bool
+	for _, cmd := range out.Commands {
+		if cmd.Name == "query" {
+			queryFound = true
+			if !cmd.Idempotent {
+				t.Error("query: expected Idempotent=true")
+			}
+		}
+	}
+	if !queryFound {
+		t.Error("query command not found in describe output")
+	}
+}
+
 func TestV2SchemaFlag(t *testing.T) {
 	buf := &bytes.Buffer{}
 

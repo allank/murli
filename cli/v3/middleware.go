@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -42,6 +43,44 @@ func Wrap(app *cli.Command) {
 		}
 		murli.CheckConventions(cmdNames, flagNames, writerOrDefault(app.ErrWriter, os.Stderr))
 	}
+
+	// Auto-mount describe command if not already present.
+	for _, c := range app.Commands {
+		if c.Name == "describe" {
+			return // already mounted
+		}
+	}
+	describeV3 := &cli.Command{
+		Name:  "describe",
+		Usage: "Print the full command tree and capabilities as a single JSON document",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "output", Usage: "Output format: json|ndjson|yaml|text"},
+			&cli.StringFlag{Name: "protocol-version", Usage: "Protocol version (0.1|0.2)"},
+		},
+		Action: func(ctx context.Context, c *cli.Command) error {
+			stdout := writerOrDefault(app.Writer, os.Stdout)
+			out := murli.DescribeOutput{
+				Name:          app.Name,
+				Summary:       app.Usage,
+				SchemaVersion: murli.SchemaVersion,
+				ToolVersion:   murli.ToolVersion,
+				Capabilities:  murli.DefaultCapabilities(),
+				Conventions:   murli.ConventionalVocabulary(),
+			}
+			for _, cmd := range app.Commands {
+				if cmd.Hidden || cmd.Name == "describe" {
+					continue
+				}
+				out.Commands = append(out.Commands, BuildV3DescribeTree(cmd))
+			}
+			enc := json.NewEncoder(stdout)
+			enc.SetIndent("", "  ")
+			enc.SetEscapeHTML(false)
+			_ = enc.Encode(out)
+			return nil
+		},
+	}
+	app.Commands = append(app.Commands, describeV3)
 }
 
 func wrapCommands(cmds []*cli.Command, root *cli.Command) {
