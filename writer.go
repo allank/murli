@@ -89,6 +89,43 @@ func (w *Writer) WriteEvent(v any) {
 	fmt.Fprintf(w.stdout, "%s\n", data)
 }
 
+// ProgressEvent carries typed progress state for long-running operations.
+// All fields are optional — populate what is meaningful for the operation.
+type ProgressEvent struct {
+	Stage   string  `json:"stage,omitempty"`
+	Current int     `json:"current,omitempty"`
+	Total   int     `json:"total,omitempty"`
+	Percent float64 `json:"percent,omitempty"`
+	EtaMs   int64   `json:"eta_ms,omitempty"`
+	Message string  `json:"message,omitempty"`
+}
+
+// WriteProgress emits a structured progress event to stderr.
+// Agent mode: minified JSON on one line (via json.Marshal, consistent with WriteEvent).
+// TTY mode: formatted human-readable line with carriage return to overwrite.
+func (w *Writer) WriteProgress(evt ProgressEvent) {
+	if w.isTTY {
+		line := evt.Message
+		if evt.Stage != "" {
+			line = "[" + evt.Stage + "] " + line
+		}
+		if evt.Total > 0 {
+			line += fmt.Sprintf(" (%d/%d", evt.Current, evt.Total)
+			if evt.Percent > 0 {
+				line += fmt.Sprintf(", %.0f%%", evt.Percent)
+			}
+			line += ")"
+		}
+		fmt.Fprintf(w.stderr, "\r\033[K%s", line)
+		return
+	}
+	data, err := json.Marshal(evt)
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(w.stderr, "%s\n", data)
+}
+
 // isTerminal returns true if the given writer is a character device (TTY).
 func isTerminal(w io.Writer) bool {
 	if f, ok := w.(*os.File); ok {

@@ -449,6 +449,64 @@ func (sb *safeBuffer) String() string {
 	return sb.buf.String()
 }
 
+func TestWriteProgressAgentMode(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := &Writer{stderr: buf, isTTY: false}
+
+	w.WriteProgress(ProgressEvent{
+		Stage:   "indexing",
+		Current: 42,
+		Total:   100,
+		Percent: 42.0,
+		EtaMs:   3000,
+		Message: "Indexing documents...",
+	})
+
+	line := strings.TrimSpace(buf.String())
+	var evt map[string]any
+	if err := json.Unmarshal([]byte(line), &evt); err != nil {
+		t.Fatalf("not valid JSON: %v — %q", err, line)
+	}
+	if evt["stage"] != "indexing" {
+		t.Errorf("stage: want %q, got %v", "indexing", evt["stage"])
+	}
+	if evt["current"].(float64) != 42 {
+		t.Errorf("current: want 42, got %v", evt["current"])
+	}
+	if evt["total"].(float64) != 100 {
+		t.Errorf("total: want 100, got %v", evt["total"])
+	}
+	if evt["percent"].(float64) != 42.0 {
+		t.Errorf("percent: want 42.0, got %v", evt["percent"])
+	}
+	if evt["eta_ms"].(float64) != 3000 {
+		t.Errorf("eta_ms: want 3000, got %v", evt["eta_ms"])
+	}
+	if evt["message"] != "Indexing documents..." {
+		t.Errorf("message: want %q, got %v", "Indexing documents...", evt["message"])
+	}
+}
+
+func TestWriteProgressTTYMode(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := &Writer{stderr: buf, isTTY: true}
+
+	w.WriteProgress(ProgressEvent{
+		Stage:   "building",
+		Current: 5,
+		Total:   10,
+		Message: "Compiling sources",
+	})
+
+	got := buf.String()
+	if !strings.Contains(got, "Compiling sources") {
+		t.Errorf("TTY progress missing message: %q", got)
+	}
+	if strings.HasPrefix(strings.TrimSpace(got), "{") {
+		t.Error("TTY progress must not emit JSON")
+	}
+}
+
 func TestAgentErrorExtendedFields(t *testing.T) {
 	var capturedCode int
 	ExitFunc = func(code int) { capturedCode = code }
