@@ -50,6 +50,22 @@ func WithProtocolVersion(v string) WriterOption {
 	}
 }
 
+// WithForce sets the force flag, activating bypass of the non-interactive mutation guard.
+// Set to true when --force or --yes is present on the command line.
+func WithForce(force bool) WriterOption {
+	return func(w *Writer) {
+		w.force = force
+	}
+}
+
+// WithDryRun sets the dry-run flag.
+// Set to true when --dry-run is present on the command line.
+func WithDryRun(dryRun bool) WriterOption {
+	return func(w *Writer) {
+		w.dryRun = dryRun
+	}
+}
+
 // Writer handles dynamic output routing based on terminal presence, agent flags,
 // explicit output format, and negotiated protocol version.
 type Writer struct {
@@ -59,7 +75,8 @@ type Writer struct {
 	isTTY           bool
 	outputFormat    OutputFormat
 	protocolVersion string
-	force           bool // reserved: will back --force/--yes bypass of the non-interactive guard (v0.4)
+	force           bool // set via WithForce; backs --force/--yes bypass of the mutation guard
+	dryRun          bool // set via WithDryRun; backs --dry-run flag
 	logger          *Logger
 }
 
@@ -72,7 +89,6 @@ func NewWriter(stdout, stderr io.Writer, agentMode bool, opts ...WriterOption) *
 		stdout: stdout,
 		stderr: stderr,
 		isTTY:  isTTY,
-		force:  agentMode,
 	}
 	for _, opt := range opts {
 		opt(w)
@@ -91,6 +107,19 @@ func NewWriter(stdout, stderr io.Writer, agentMode bool, opts ...WriterOption) *
 // IsTTY returns true if the writer is in human (TTY) mode.
 func (w *Writer) IsTTY() bool {
 	return w.isTTY
+}
+
+// IsForced returns true if --force or --yes was passed on the command line.
+// Engineers may use this to suppress their own confirmation prompts in TTY mode.
+// The non-interactive mutation guard bypass is automatic when IsForced is true.
+func (w *Writer) IsForced() bool {
+	return w.force
+}
+
+// IsDryRun returns true if --dry-run was passed on the command line.
+// Engineers should check this at the start of their action and call WritePlan() if true.
+func (w *Writer) IsDryRun() bool {
+	return w.dryRun
 }
 
 // Format returns the explicit output format (may be OutputFormatDefault).
@@ -160,6 +189,55 @@ func (w *Writer) buildSuccessEnvelope(jsonPayload any) map[string]any {
 	envelope := map[string]any{
 		"status": "ok",
 		"result": jsonPayload,
+	}
+	if w.ProtocolVersion() != "0.1" {
+		envelope["schema_version"] = SchemaVersion
+		if ToolVersion != "" {
+			envelope["tool_version"] = ToolVersion
+		}
+	}
+	return envelope
+}
+
+// WritePlan writes a dry-run plan to stdout. Format depends on outputFormat and isTTY:
+//   - TTY or OutputFormatText: humanText plain line
+//   - OutputFormatNDJSON: single minified JSON line with "status": "plan"
+//   - OutputFormatYAML: YAML-encoded plan envelope
+//   - OutputFormatJSON or default agent mode: pretty-printed JSON with "status": "plan"
+func (w *Writer) WritePlan(humanText string, plan any) {
+	switch {
+	case w.outputFormat == OutputFormatText || (w.outputFormat == OutputFormatDefault && w.isTTY):
+		fmt.Fprintln(w.stdout, humanText)
+
+	case w.outputFormat == OutputFormatNDJSON:
+		envelope := w.buildPlanEnvelope(plan)
+		data, err := json.Marshal(envelope)
+		if err != nil {
+			return
+		}
+		fmt.Fprintf(w.stdout, "%s\n", data)
+
+	case w.outputFormat == OutputFormatYAML:
+		envelope := w.buildPlanEnvelope(plan)
+		enc := yaml.NewEncoder(w.stdout)
+		enc.SetIndent(2)
+		_ = enc.Encode(envelope)
+
+	default: // OutputFormatJSON or default agent mode
+		envelope := w.buildPlanEnvelope(plan)
+		enc := json.NewEncoder(w.stdout)
+		enc.SetIndent("", "  ")
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(envelope)
+	}
+}
+
+// buildPlanEnvelope constructs the plan envelope map,
+// respecting the negotiated protocol version.
+func (w *Writer) buildPlanEnvelope(plan any) map[string]any {
+	envelope := map[string]any{
+		"status": "plan",
+		"result": plan,
 	}
 	if w.ProtocolVersion() != "0.1" {
 		envelope["schema_version"] = SchemaVersion

@@ -1078,3 +1078,128 @@ func TestMetadataDryRunnableField(t *testing.T) {
 		t.Error("reversible must be omitted when false")
 	}
 }
+
+func TestWriterIsForced(t *testing.T) {
+	t.Run("IsForced false by default", func(t *testing.T) {
+		w := &Writer{stdout: &bytes.Buffer{}, isTTY: false}
+		if w.IsForced() {
+			t.Error("IsForced must be false by default")
+		}
+	})
+
+	t.Run("WithForce(true) sets IsForced", func(t *testing.T) {
+		w := NewWriter(&bytes.Buffer{}, &bytes.Buffer{}, false, WithForce(true))
+		if !w.IsForced() {
+			t.Error("IsForced must be true when WithForce(true) passed")
+		}
+	})
+}
+
+func TestWriterIsDryRun(t *testing.T) {
+	t.Run("IsDryRun false by default", func(t *testing.T) {
+		w := &Writer{stdout: &bytes.Buffer{}, isTTY: false}
+		if w.IsDryRun() {
+			t.Error("IsDryRun must be false by default")
+		}
+	})
+
+	t.Run("WithDryRun(true) sets IsDryRun", func(t *testing.T) {
+		w := NewWriter(&bytes.Buffer{}, &bytes.Buffer{}, false, WithDryRun(true))
+		if !w.IsDryRun() {
+			t.Error("IsDryRun must be true when WithDryRun(true) passed")
+		}
+	})
+}
+
+func TestWritePlanAgentMode(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := &Writer{stdout: buf, isTTY: false}
+
+	w.WritePlan("Would delete 3 files", map[string]any{"files": []string{"a", "b", "c"}})
+
+	var env map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("WritePlan did not produce valid JSON: %v\nraw: %s", err, buf.String())
+	}
+	if env["status"] != "plan" {
+		t.Errorf("status: want %q, got %v", "plan", env["status"])
+	}
+	if env["result"] == nil {
+		t.Error("result must be present")
+	}
+	if env["schema_version"] != SchemaVersion {
+		t.Errorf("schema_version: want %q, got %v", SchemaVersion, env["schema_version"])
+	}
+}
+
+func TestWritePlanTTYMode(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := &Writer{stdout: buf, isTTY: true}
+
+	w.WritePlan("Would delete 3 files", map[string]any{"files": []string{"a", "b", "c"}})
+
+	got := strings.TrimSpace(buf.String())
+	if got != "Would delete 3 files" {
+		t.Errorf("TTY WritePlan: want %q, got %q", "Would delete 3 files", got)
+	}
+	if strings.HasPrefix(got, "{") {
+		t.Error("TTY WritePlan must not emit JSON")
+	}
+}
+
+func TestWritePlanNDJSON(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := NewWriter(buf, &bytes.Buffer{}, false, WithOutputFormat(OutputFormatNDJSON))
+
+	w.WritePlan("Would delete 3 files", map[string]any{"count": 3})
+
+	line := strings.TrimSpace(buf.String())
+	if strings.Contains(line, "\n") {
+		t.Error("ndjson WritePlan must be single line")
+	}
+	var env map[string]any
+	if err := json.Unmarshal([]byte(line), &env); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if env["status"] != "plan" {
+		t.Errorf("status: want %q, got %v", "plan", env["status"])
+	}
+}
+
+func TestWritePlanYAML(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := NewWriter(buf, &bytes.Buffer{}, false, WithOutputFormat(OutputFormatYAML))
+
+	w.WritePlan("Would delete 3 files", map[string]any{"count": 3})
+
+	got := buf.String()
+	if !strings.Contains(got, "status: plan") {
+		t.Errorf("YAML WritePlan: expected 'status: plan', got: %q", got)
+	}
+}
+
+func TestWritePlanOmitsToolVersionWhenUnset(t *testing.T) {
+	orig := ToolVersion
+	ToolVersion = ""
+	defer func() { ToolVersion = orig }()
+
+	buf := &bytes.Buffer{}
+	w := &Writer{stdout: buf, isTTY: false}
+	w.WritePlan("plan", nil)
+
+	var env map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if _, present := env["tool_version"]; present {
+		t.Error("tool_version must be absent when ToolVersion is empty")
+	}
+}
+
+func TestAgentModeForceFieldNotSetFromAgentMode(t *testing.T) {
+	// agentMode=true must not set force; force is only set via WithForce
+	w := NewWriter(&bytes.Buffer{}, &bytes.Buffer{}, true)
+	if w.IsForced() {
+		t.Error("agentMode=true must not set IsForced — use WithForce for that")
+	}
+}
