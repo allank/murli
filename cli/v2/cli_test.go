@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 
@@ -398,9 +399,11 @@ func TestV2ForceFlagsRegisteredOnMutatingCommand(t *testing.T) {
 
 func TestV2MutatingGuardBypassedWithForceFlag(t *testing.T) {
 	ran := false
+	outBuf := &bytes.Buffer{}
 	errBuf := &bytes.Buffer{}
 	app := &cli.App{
 		Name:      "testapp",
+		Writer:    outBuf,
 		ErrWriter: errBuf,
 		Commands: []*cli.Command{
 			{
@@ -415,6 +418,30 @@ func TestV2MutatingGuardBypassedWithForceFlag(t *testing.T) {
 
 	if !ran {
 		t.Error("Action must run when --force is passed (guard bypassed)")
+	}
+}
+
+func TestV2MutatingGuardBypassedWithYesFlag(t *testing.T) {
+	ran := false
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	app := &cli.App{
+		Name:      "testapp",
+		Writer:    outBuf,
+		ErrWriter: errBuf,
+		Commands: []*cli.Command{
+			{
+				Name: "delete",
+				Action: func(ctx *cli.Context) error { ran = true; return nil },
+			},
+		},
+	}
+	murliCLI.Annotate(app.Commands[0], murli.Metadata{Mutating: true})
+	murliCLI.Wrap(app)
+	_ = app.Run([]string{"testapp", "delete", "--yes"})
+
+	if !ran {
+		t.Error("Action must run when --yes is passed (guard bypassed)")
 	}
 }
 
@@ -453,6 +480,34 @@ func TestV2ContextCancelledMapsToExitCancelled(t *testing.T) {
 	}
 	if resp.Recoverable {
 		t.Error("cancelled error must not be Recoverable")
+	}
+}
+
+func TestV2WrappedContextCancelledDetected(t *testing.T) {
+	var capturedExit int
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = func(code int) {} }()
+
+	capturedExit = -999
+	errBuf := &bytes.Buffer{}
+
+	app := &cli.App{
+		Name:      "testapp",
+		ErrWriter: errBuf,
+		Commands: []*cli.Command{
+			{
+				Name: "work",
+				Action: func(ctx *cli.Context) error {
+					return fmt.Errorf("operation failed: %w", context.Canceled)
+				},
+			},
+		},
+	}
+	murliCLI.Wrap(app)
+	_ = app.Run([]string{"testapp", "work"})
+
+	if capturedExit != murli.ExitCancelled {
+		t.Errorf("exit code: want %d (ExitCancelled), got %d", murli.ExitCancelled, capturedExit)
 	}
 }
 
