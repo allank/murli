@@ -732,6 +732,73 @@ Agents use the block to reason about risk:
 - `dry_run_supported: true` → probe with `--dry-run` first
 - `read_only: true` → safe to call without confirmation
 
+### 21. Profiles — Saved Flag Sets
+
+Profiles let agents (and humans) save named sets of root-level flag values and apply them automatically on every invocation. No more repeating `--region us-east-1 --token abc` on every call.
+
+Mark flags as profileable in `Annotate()`:
+
+```go
+// Cobra example — annotate the root command
+murliCobra.Annotate(rootCmd, murli.Metadata{
+    FlagAnnotations: map[string]murli.FlagAnnotation{
+        "region": {Profileable: true},
+        "token":  {Profileable: true},
+    },
+})
+```
+
+Murli auto-mounts `profile save|use|list|show|delete` on the root command. Save the current profileable flags into a named profile:
+
+```
+mytool --region us-east-1 --token abc profile save production
+```
+
+Set it as the default so all future invocations use it automatically:
+
+```
+mytool profile use production
+```
+
+Now every `mytool` invocation gets `--region us-east-1` and `--token abc` without passing them explicitly.
+
+Profiles are stored at `~/.<toolname>/profiles.json` in human-readable JSON. Pass `--profile <name>` to override the default for a single invocation. An explicit flag on the command line always wins over the stored profile value.
+
+For cli/v2, annotate the app-level flags using `AnnotateApp`:
+
+```go
+murliCLIv2.AnnotateApp(app, murli.Metadata{
+    FlagAnnotations: map[string]murli.FlagAnnotation{
+        "region": {Profileable: true},
+    },
+})
+```
+
+For cli/v3, `Annotate` on the root command works the same as cobra.
+
+### 22. --profile Flag
+
+`--profile <name>` is auto-registered on the root command by all three adapters. It selects a saved profile to apply for a single invocation, overriding the default set by `profile use`.
+
+```
+mytool --profile staging list-users
+```
+
+`--profile` is excluded from `--schema` and `describe` flag lists (infrastructure flag). Agents discover available profiles and profileable flags via `describe`:
+
+```json
+{
+  "capabilities": { "profiles": true },
+  "profiles": {
+    "available": ["production", "staging"],
+    "default": "production",
+    "profileable_flags": ["region", "token"]
+  }
+}
+```
+
+`capabilities.profiles: true` signals that the profile subcommands are available. `profileable_flags` tells agents which flags they can save before making any invocations.
+
 ---
 
 ## 🧪 Testing
