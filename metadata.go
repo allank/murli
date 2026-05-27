@@ -16,7 +16,7 @@ type Metadata struct {
 	// Mutating marks commands that write, delete, or otherwise change state.
 	// When true and the output is not a TTY, the adapter rejects the command with a
 	// confirmation_required error to prevent accidental mutation in non-interactive mode.
-	// A bypass flag (--force / --yes) will be added in a future release.
+	// Pass --force or --yes to bypass the guard.
 	Mutating bool `json:"mutating,omitempty"`
 
 	// Arguments defines explicit positional argument documentation.

@@ -613,3 +613,52 @@ func TestV2InfraFlagsAbsentFromSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestV2SafetyBlockInDescribeOutput(t *testing.T) {
+	outBuf := &bytes.Buffer{}
+	app := &cli.App{
+		Name:   "app",
+		Writer: outBuf,
+		Commands: []*cli.Command{
+			{
+				Name:   "delete",
+				Action: func(ctx *cli.Context) error { return nil },
+			},
+		},
+	}
+	murliCLI.Annotate(app.Commands[0], murli.Metadata{
+		Mutating:    true,
+		Destructive: true,
+		DryRunnable: true,
+	})
+	murliCLI.Wrap(app)
+
+	if err := app.Run([]string{"app", "describe"}); err != nil {
+		t.Fatalf("Run describe: %v", err)
+	}
+
+	var out murli.DescribeOutput
+	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, outBuf.String())
+	}
+
+	var deleteFound *murli.DescribeCommandSchema
+	for i := range out.Commands {
+		if out.Commands[i].Name == "delete" {
+			deleteFound = &out.Commands[i]
+			break
+		}
+	}
+	if deleteFound == nil {
+		t.Fatal("delete command not found in describe output")
+	}
+	if deleteFound.Safety.ReadOnly {
+		t.Error("delete safety.read_only must be false")
+	}
+	if !deleteFound.Safety.Destructive {
+		t.Error("delete safety.destructive must be true")
+	}
+	if !deleteFound.Safety.DryRunnable {
+		t.Error("delete safety.dry_run_supported must be true")
+	}
+}
