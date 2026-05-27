@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/allank/murli"
 	"github.com/urfave/cli/v3"
@@ -34,8 +37,39 @@ func Run(app *cli.Command, args []string) error {
 
 // Wrap injects --schema and --agent flags and wraps all command Actions.
 func Wrap(app *cli.Command) {
+	// Guard against double-wrapping on repeated Wrap() calls.
+	if app.Metadata == nil {
+		app.Metadata = make(map[string]any)
+	}
+	if app.Metadata["murli_enabled"] == true {
+		return
+	}
+	app.Metadata["murli_enabled"] = true
+
 	// Suppress urfave/cli's built-in error printing so murli controls all stderr output.
 	app.ExitErrHandler = func(_ context.Context, _ *cli.Command, _ error) {}
+
+	// Register --profile and --agent root flags if not already present.
+	hasProfile := false
+	hasAgent := false
+	for _, f := range app.Flags {
+		names := f.Names()
+		if len(names) == 0 {
+			continue
+		}
+		switch names[0] {
+		case "profile":
+			hasProfile = true
+		case "agent":
+			hasAgent = true
+		}
+	}
+	if !hasProfile {
+		app.Flags = append(app.Flags, &cli.StringFlag{Name: "profile", Usage: "Profile name to use for this invocation"})
+	}
+	if !hasAgent {
+		app.Flags = append(app.Flags, &cli.BoolFlag{Name: "agent", Usage: "Force agent-optimized JSON mode"})
+	}
 
 	wrapCommands(app.Commands, app)
 
@@ -51,40 +85,69 @@ func Wrap(app *cli.Command) {
 	// Auto-mount describe command if not already present.
 	for _, c := range app.Commands {
 		if c.Name == "describe" {
-			return // already mounted
+			// describe already mounted — check if profile subcommand is needed below
+			goto mountProfile
 		}
 	}
-	describeV3 := &cli.Command{
-		Name:  "describe",
-		Usage: "Print the full command tree and capabilities as a single JSON document",
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "output", Usage: "Output format: json|ndjson|yaml|text"},
-			&cli.StringFlag{Name: "protocol-version", Usage: "Protocol version (0.1|0.2)"},
-		},
-		Action: func(ctx context.Context, c *cli.Command) error {
-			stdout := writerOrDefault(app.Writer, os.Stdout)
-			out := murli.DescribeOutput{
-				Name:          app.Name,
-				Summary:       app.Usage,
-				SchemaVersion: murli.SchemaVersion,
-				ToolVersion:   murli.ToolVersion,
-				Capabilities:  murli.DefaultCapabilities(),
-				Conventions:   murli.ConventionalVocabulary(),
-			}
-			for _, cmd := range app.Commands {
-				if cmd.Hidden || cmd.Name == "describe" {
-					continue
+	{
+		describeV3 := &cli.Command{
+			Name:  "describe",
+			Usage: "Print the full command tree and capabilities as a single JSON document",
+			Flags: []cli.Flag{
+				&cli.StringFlag{Name: "output", Usage: "Output format: json|ndjson|yaml|text"},
+				&cli.StringFlag{Name: "protocol-version", Usage: "Protocol version (0.1|0.2)"},
+			},
+			Action: func(ctx context.Context, c *cli.Command) error {
+				stdout := writerOrDefault(app.Writer, os.Stdout)
+
+				appStore, _ := murli.LoadProfileStore(app.Name)
+				rootMeta := metadataFor(app)
+				profileableNames := []string{}
+				for flagName, ann := range rootMeta.FlagAnnotations {
+					if ann.Profileable {
+						profileableNames = append(profileableNames, flagName)
+					}
 				}
-				out.Commands = append(out.Commands, BuildV3DescribeTree(cmd))
-			}
-			enc := json.NewEncoder(stdout)
-			enc.SetIndent("", "  ")
-			enc.SetEscapeHTML(false)
-			_ = enc.Encode(out)
-			return nil
-		},
+				sort.Strings(profileableNames)
+				profilesInfo := &murli.ProfilesInfo{ProfileableFlags: profileableNames}
+				if appStore != nil && len(appStore.Names()) > 0 {
+					profilesInfo.Available = appStore.Names()
+					profilesInfo.Default = appStore.Default
+				}
+
+				out := murli.DescribeOutput{
+					Name:          app.Name,
+					Summary:       app.Usage,
+					SchemaVersion: murli.SchemaVersion,
+					ToolVersion:   murli.ToolVersion,
+					Capabilities:  murli.DefaultCapabilities(),
+					Conventions:   murli.ConventionalVocabulary(),
+					Profiles:      profilesInfo,
+				}
+				for _, cmd := range app.Commands {
+					if cmd.Hidden || cmd.Name == "describe" {
+						continue
+					}
+					out.Commands = append(out.Commands, BuildV3DescribeTree(cmd))
+				}
+				enc := json.NewEncoder(stdout)
+				enc.SetIndent("", "  ")
+				enc.SetEscapeHTML(false)
+				_ = enc.Encode(out)
+				return nil
+			},
+		}
+		app.Commands = append(app.Commands, describeV3)
 	}
-	app.Commands = append(app.Commands, describeV3)
+
+mountProfile:
+	// Auto-mount profile subcommand group if not already present.
+	for _, c := range app.Commands {
+		if c.Name == "profile" {
+			return
+		}
+	}
+	app.Commands = append(app.Commands, buildV3ProfileGroup(app))
 }
 
 func wrapCommands(cmds []*cli.Command, root *cli.Command) {
@@ -130,6 +193,10 @@ func wrapCommands(cmds []*cli.Command, root *cli.Command) {
 		currentCmd := cmd
 
 		cmd.Action = func(ctx context.Context, c *cli.Command) error {
+			if stopped := applyV3Profile(c); stopped {
+				return nil // not_found error already written
+			}
+
 			if c.Bool("schema") {
 				out := writerOrDefault(root.Writer, os.Stdout)
 				return EmitSchema(currentCmd, out)
@@ -268,3 +335,255 @@ func rootWriter(app *cli.Command) *murli.Writer {
 	)
 }
 
+// applyV3Profile reads the active profile and applies stored flag values to root
+// flags that were not explicitly set.
+// Returns true if execution should stop (not_found error written for explicit missing profile).
+func applyV3Profile(c *cli.Command) (stopped bool) {
+	root := c.Root()
+	store, err := murli.LoadProfileStore(root.Name)
+	if err != nil {
+		return false
+	}
+	explicitProfile := root.String("profile")
+	profileName := explicitProfile
+	if profileName == "" {
+		profileName = store.Default
+	}
+	if profileName == "" {
+		return false
+	}
+	profile, ok := store.Get(profileName)
+	if !ok {
+		if explicitProfile != "" {
+			w := NewWriter(c)
+			w.WriteError(&murli.AgentError{
+				Code:        murli.ExitNotFound,
+				ErrorType:   "not_found",
+				Message:     fmt.Sprintf("profile %q not found", explicitProfile),
+				Suggestion:  "Run 'profile list' to see available profiles.",
+				Recoverable: false,
+			})
+			return true
+		}
+		return false
+	}
+	for flagName, value := range profile.Flags {
+		if !root.IsSet(flagName) {
+			_ = root.Set(flagName, value)
+		}
+	}
+	return false
+}
+
+// v3FlagStringValue returns the string representation of a named root flag's current value.
+func v3FlagStringValue(root *cli.Command, name string) string {
+	for _, f := range root.Flags {
+		names := f.Names()
+		if len(names) == 0 || names[0] != name {
+			continue
+		}
+		switch f.(type) {
+		case *cli.BoolFlag:
+			return strconv.FormatBool(root.Bool(name))
+		case *cli.IntFlag:
+			return strconv.Itoa(root.Int(name))
+		case *cli.Float64Flag:
+			return strconv.FormatFloat(root.Float64(name), 'f', -1, 64)
+		default:
+			return root.String(name)
+		}
+	}
+	return root.String(name)
+}
+
+// buildV3ProfileGroup builds the `profile` command group for urfave/cli v3.
+func buildV3ProfileGroup(app *cli.Command) *cli.Command {
+	return &cli.Command{
+		Name:  "profile",
+		Usage: "Manage saved flag profiles",
+		Commands: []*cli.Command{
+			{
+				Name:      "save",
+				Usage:     "Save current profileable flags as a named profile",
+				ArgsUsage: "<name>",
+				Action: func(ctx context.Context, c *cli.Command) error {
+					if c.Args().Len() < 1 {
+						return fmt.Errorf("profile save requires a name argument")
+					}
+					name := c.Args().First()
+					w := NewWriter(c)
+					root := c.Root()
+					rootMeta := metadataFor(app)
+					flags := make(map[string]string)
+					for flagName, ann := range rootMeta.FlagAnnotations {
+						if ann.Profileable && root.IsSet(flagName) {
+							flags[flagName] = v3FlagStringValue(root, flagName)
+						}
+					}
+					if len(flags) == 0 {
+						w.WriteError(&murli.AgentError{
+							Code:        murli.ExitUserError,
+							ErrorType:   "user_error",
+							Message:     "no profileable flags were set",
+							Suggestion:  "Pass at least one profileable flag when running profile save. Use --schema to see which flags are profileable.",
+							Recoverable: true,
+						})
+						return nil
+					}
+					store, err := murli.LoadProfileStore(app.Name)
+					if err != nil {
+						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						return nil
+					}
+					store.Set(name, murli.Profile{Flags: flags})
+					if err := store.Save(app.Name); err != nil {
+						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to save profile store: " + err.Error()})
+						return nil
+					}
+					w.WriteSuccess(
+						fmt.Sprintf("Profile %q saved.", name),
+						map[string]any{"profile": name, "flags": flags},
+					)
+					return nil
+				},
+			},
+			{
+				Name:      "use",
+				Usage:     "Set a profile as the default",
+				ArgsUsage: "<name>",
+				Action: func(ctx context.Context, c *cli.Command) error {
+					if c.Args().Len() < 1 {
+						return fmt.Errorf("profile use requires a name argument")
+					}
+					name := c.Args().First()
+					w := NewWriter(c)
+					store, err := murli.LoadProfileStore(app.Name)
+					if err != nil {
+						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						return nil
+					}
+					if err := store.SetDefault(name); err != nil {
+						w.WriteError(&murli.AgentError{
+							Code:        murli.ExitNotFound,
+							ErrorType:   "not_found",
+							Message:     fmt.Sprintf("profile %q not found", name),
+							Suggestion:  "Run 'profile list' to see available profiles.",
+							Recoverable: false,
+						})
+						return nil
+					}
+					if err := store.Save(app.Name); err != nil {
+						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to save profile store: " + err.Error()})
+						return nil
+					}
+					w.WriteSuccess(
+						fmt.Sprintf("Profile %q is now the default.", name),
+						map[string]any{"default": name},
+					)
+					return nil
+				},
+			},
+			{
+				Name:  "list",
+				Usage: "List all saved profiles",
+				Action: func(ctx context.Context, c *cli.Command) error {
+					w := NewWriter(c)
+					store, err := murli.LoadProfileStore(app.Name)
+					if err != nil {
+						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						return nil
+					}
+					names := store.Names()
+					payload := map[string]any{"profiles": names}
+					if store.Default != "" {
+						payload["default"] = store.Default
+					}
+					lines := make([]string, 0, len(names))
+					for _, n := range names {
+						if n == store.Default {
+							lines = append(lines, "  "+n+" *")
+						} else {
+							lines = append(lines, "  "+n)
+						}
+					}
+					humanText := strings.Join(lines, "\n")
+					if humanText == "" {
+						humanText = "(no profiles saved)"
+					}
+					w.WriteSuccess(humanText, payload)
+					return nil
+				},
+			},
+			{
+				Name:      "show",
+				Usage:     "Show the flag values in a profile",
+				ArgsUsage: "<name>",
+				Action: func(ctx context.Context, c *cli.Command) error {
+					if c.Args().Len() < 1 {
+						return fmt.Errorf("profile show requires a name argument")
+					}
+					name := c.Args().First()
+					w := NewWriter(c)
+					store, err := murli.LoadProfileStore(app.Name)
+					if err != nil {
+						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						return nil
+					}
+					profile, ok := store.Get(name)
+					if !ok {
+						w.WriteError(&murli.AgentError{
+							Code:        murli.ExitNotFound,
+							ErrorType:   "not_found",
+							Message:     fmt.Sprintf("profile %q not found", name),
+							Suggestion:  "Run 'profile list' to see available profiles.",
+							Recoverable: false,
+						})
+						return nil
+					}
+					w.WriteSuccess(
+						fmt.Sprintf("Profile %q: %v", name, profile.Flags),
+						map[string]any{"name": name, "flags": profile.Flags},
+					)
+					return nil
+				},
+			},
+			{
+				Name:      "delete",
+				Usage:     "Delete a saved profile",
+				ArgsUsage: "<name>",
+				Action: func(ctx context.Context, c *cli.Command) error {
+					if c.Args().Len() < 1 {
+						return fmt.Errorf("profile delete requires a name argument")
+					}
+					name := c.Args().First()
+					w := NewWriter(c)
+					store, err := murli.LoadProfileStore(app.Name)
+					if err != nil {
+						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						return nil
+					}
+					if _, ok := store.Get(name); !ok {
+						w.WriteError(&murli.AgentError{
+							Code:        murli.ExitNotFound,
+							ErrorType:   "not_found",
+							Message:     fmt.Sprintf("profile %q not found", name),
+							Suggestion:  "Run 'profile list' to see available profiles.",
+							Recoverable: false,
+						})
+						return nil
+					}
+					store.Delete(name)
+					if err := store.Save(app.Name); err != nil {
+						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to save profile store: " + err.Error()})
+						return nil
+					}
+					w.WriteSuccess(
+						fmt.Sprintf("Profile %q deleted.", name),
+						map[string]any{"deleted": name},
+					)
+					return nil
+				},
+			},
+		},
+	}
+}
