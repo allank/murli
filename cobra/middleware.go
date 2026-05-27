@@ -56,6 +56,15 @@ func Enable(rootCmd *gocobra.Command) {
 		murli.CheckConventions(cmdNames, flagNames, rootCmd.ErrOrStderr())
 	}
 
+	// Guard against double-wrapping on repeated Enable() calls.
+	if rootCmd.Annotations == nil {
+		rootCmd.Annotations = make(map[string]string)
+	}
+	if rootCmd.Annotations["murli_enabled"] == "1" {
+		return
+	}
+	rootCmd.Annotations["murli_enabled"] = "1"
+
 	wrapCommands(rootCmd)
 
 	// Auto-mount describe command if not already present.
@@ -70,9 +79,9 @@ func Enable(rootCmd *gocobra.Command) {
 		RunE: func(cmd *gocobra.Command, args []string) error {
 			store, _ := murli.LoadProfileStore(rootCmd.Name()) // empty store on error — never fail describe
 
-			// Collect profileable root flag names.
+			// Collect profileable root flag names (always a non-nil slice so it serialises as []).
 			rootMeta := cobraMetadata(rootCmd)
-			var profileableNames []string
+			profileableNames := []string{}
 			for flagName, ann := range rootMeta.FlagAnnotations {
 				if ann.Profileable {
 					profileableNames = append(profileableNames, flagName)
@@ -317,13 +326,16 @@ func cobraMetadata(cmd *gocobra.Command) murli.Metadata {
 
 // applyCobraProfile reads the active profile (from --profile flag or store default)
 // and applies stored flag values to root persistent flags that were not explicitly set.
+// If --profile was explicitly passed and the profile does not exist, a not_found error
+// is written and execution stops (the command action is not reached).
 func applyCobraProfile(c *gocobra.Command) {
 	root := c.Root()
 	store, err := murli.LoadProfileStore(root.Name())
 	if err != nil {
 		return // silent — disk errors must not break normal operation
 	}
-	profileName, _ := root.PersistentFlags().GetString("profile")
+	explicitProfile, _ := root.PersistentFlags().GetString("profile")
+	profileName := explicitProfile
 	if profileName == "" {
 		profileName = store.Default
 	}
@@ -332,6 +344,17 @@ func applyCobraProfile(c *gocobra.Command) {
 	}
 	profile, ok := store.Get(profileName)
 	if !ok {
+		if explicitProfile != "" {
+			// User explicitly requested a non-existent profile — surface as error.
+			w := NewWriter(c)
+			w.WriteError(&murli.AgentError{
+				Code:        murli.ExitNotFound,
+				ErrorType:   "not_found",
+				Message:     fmt.Sprintf("profile %q not found", explicitProfile),
+				Suggestion:  "Run 'profile list' to see available profiles.",
+				Recoverable: false,
+			})
+		}
 		return
 	}
 	for flagName, value := range profile.Flags {
