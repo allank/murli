@@ -621,6 +621,117 @@ ANSI escape codes in log messages (e.g. colour output from upstream libraries) a
 writer.Log("\x1b[32mSuccess\x1b[0m") // TTY: green "Success"; agent: plain "Success" in JSON
 ```
 
+### 17. Dry-Run Support (v0.4+)
+
+Opt in by setting `DryRunnable: true` in `Annotate()`. Murli auto-registers `--dry-run` on that command. Engineers check `IsDryRun()` at the start of their action and return a plan via `WritePlan()` if true. Non-DryRunnable commands do not receive the flag.
+
+```go
+murliCobra.Annotate(deleteCmd, murli.Metadata{
+    Mutating:    true,
+    Destructive: true,
+    DryRunnable: true,
+})
+
+deleteCmd.RunE = func(cmd *cobra.Command, args []string) error {
+    w := murliCobra.NewWriter(cmd)
+
+    if w.IsDryRun() {
+        plan := map[string]any{"would_delete": args[0]}
+        w.WritePlan("Would delete "+args[0]+" (dry run — no changes made)", plan)
+        return nil
+    }
+
+    // real deletion here ...
+    w.WriteSuccess("Deleted "+args[0], map[string]any{"id": args[0]})
+    return nil
+}
+```
+
+`WritePlan` outputs `{"status": "plan", "result": <plan>, "schema_version": "0.2"}` in agent mode — same envelope shape as `WriteSuccess` but `"status"` is `"plan"` instead of `"ok"`. In TTY mode it prints `humanText` as plain text.
+
+**Honouring the contract is the engineer's responsibility.** Declaring `DryRunnable: true` signals to agents that `--dry-run` produces a plan rather than executing. If you don't call `IsDryRun()`, the command runs normally.
+
+### 18. --force / --yes Guard Bypass (v0.4+)
+
+Commands marked `Mutating: true` automatically receive `--force` and `--yes` flags. When either is passed, the non-interactive mutation guard is bypassed and the action runs. The two flags are aliases — either one activates the bypass.
+
+```go
+murliCobra.Annotate(deleteCmd, murli.Metadata{Mutating: true})
+// --force and --yes are now available on deleteCmd; no other changes needed.
+```
+
+Engineers who need to suppress their own confirmation prompts can call `w.IsForced()`:
+
+```go
+deleteCmd.RunE = func(cmd *cobra.Command, args []string) error {
+    w := murliCobra.NewWriter(cmd)
+    if !w.IsForced() && someCustomRiskCheck() {
+        return murli.NewUserError("high-risk operation", "Pass --force to confirm")
+    }
+    // proceed ...
+    return nil
+}
+```
+
+`--force` and `--yes` are excluded from `--schema` and `describe` output (infrastructure flags). Agents infer force support from `safety.read_only: false` — if a command is not read-only, force/yes are always available.
+
+### 19. Context Cancellation → Structured Errors (v0.4+)
+
+All three adapters automatically detect context errors in the error-wrapping path:
+
+| Returned error | Exit code | `error_type` | `recoverable` |
+|---|---|---|---|
+| `context.Canceled` (or wrapped) | 9 (`ExitCancelled`) | `"cancelled"` | `false` |
+| `context.DeadlineExceeded` (or wrapped) | 4 (`ExitTimeout`) | `"timeout"` | `true` |
+
+Engineers write standard Go — return `ctx.Err()` or any error that wraps either sentinel via `fmt.Errorf("...: %w", err)`. The adapter detects it automatically.
+
+```go
+func (cmd *cobra.Command, args []string) error {
+    result, err := doWork(ctx)
+    if err != nil {
+        return fmt.Errorf("work failed: %w", err) // wraps context.Canceled or DeadlineExceeded
+    }
+    // ...
+}
+```
+
+Murli does not register signal handlers. Signal handling, context creation, and shutdown logic are the engineer's responsibility.
+
+### 20. SafetyBlock in Schema Output (v0.4+)
+
+Every command in `--schema` and `describe` output includes a `safety` block assembled from `Metadata`:
+
+```json
+{
+  "name": "delete",
+  "safety": {
+    "read_only": false,
+    "idempotent": false,
+    "destructive": true,
+    "dry_run_supported": true
+  }
+}
+```
+
+Set the fields in `Annotate()`:
+
+```go
+murliCobra.Annotate(deleteCmd, murli.Metadata{
+    Mutating:    true,
+    Destructive: true,
+    DryRunnable: true,
+    Reversible:  false, // default, omitted from JSON
+})
+```
+
+`read_only` is derived as `!Mutating` at assembly time; you never set it directly. `idempotent`, `destructive`, `reversible`, and `dry_run_supported` use `omitempty` — they are absent from JSON when false.
+
+Agents use the block to reason about risk:
+- `destructive: true, reversible: false` → require explicit confirmation or `--force`
+- `dry_run_supported: true` → probe with `--dry-run` first
+- `read_only: true` → safe to call without confirmation
+
 ---
 
 ## 🧪 Testing
