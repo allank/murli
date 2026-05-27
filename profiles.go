@@ -2,7 +2,9 @@ package murli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -34,7 +36,7 @@ func ProfilePath(toolName string) string {
 func LoadProfileStore(toolName string) (*ProfileStore, error) {
 	path := ProfilePath(toolName)
 	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return &ProfileStore{Profiles: make(map[string]Profile)}, nil
 	}
 	if err != nil {
