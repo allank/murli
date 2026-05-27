@@ -99,7 +99,7 @@ func getFlagSchemas(cmd *gocobra.Command, annotations map[string]murli.FlagAnnot
 	var list []murli.FlagSchema
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
 		if f.Name == "schema" || f.Name == "agent" || f.Name == "output" || f.Name == "protocol-version" ||
-			f.Name == "force" || f.Name == "yes" || f.Name == "dry-run" {
+			f.Name == "force" || f.Name == "yes" || f.Name == "dry-run" || f.Name == "profile" {
 			return
 		}
 		t := f.Value.Type()

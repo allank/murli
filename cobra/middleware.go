@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/allank/murli"
 	gocobra "github.com/spf13/cobra"
@@ -44,6 +46,9 @@ func Enable(rootCmd *gocobra.Command) {
 	if rootCmd.PersistentFlags().Lookup("protocol-version") == nil {
 		rootCmd.PersistentFlags().String("protocol-version", "", "Protocol version for envelope shaping (0.1|0.2)")
 	}
+	if rootCmd.PersistentFlags().Lookup("profile") == nil {
+		rootCmd.PersistentFlags().String("profile", "", "Profile name to use for this invocation")
+	}
 	// Naming convention advisory: emit warnings in TTY mode only (developer feedback).
 	if isTTYWriter(rootCmd.OutOrStdout()) {
 		var cmdNames, flagNames []string
@@ -63,6 +68,26 @@ func Enable(rootCmd *gocobra.Command) {
 		Use:   "describe",
 		Short: "Print the full command tree and capabilities as a single JSON document",
 		RunE: func(cmd *gocobra.Command, args []string) error {
+			store, _ := murli.LoadProfileStore(rootCmd.Name()) // empty store on error — never fail describe
+
+			// Collect profileable root flag names.
+			rootMeta := cobraMetadata(rootCmd)
+			var profileableNames []string
+			for flagName, ann := range rootMeta.FlagAnnotations {
+				if ann.Profileable {
+					profileableNames = append(profileableNames, flagName)
+				}
+			}
+			sort.Strings(profileableNames)
+
+			profilesInfo := &murli.ProfilesInfo{
+				ProfileableFlags: profileableNames,
+			}
+			if store != nil && len(store.Names()) > 0 {
+				profilesInfo.Available = store.Names()
+				profilesInfo.Default = store.Default
+			}
+
 			out := murli.DescribeOutput{
 				Name:          rootCmd.Name(),
 				Summary:       rootCmd.Short,
@@ -70,6 +95,7 @@ func Enable(rootCmd *gocobra.Command) {
 				ToolVersion:   murli.ToolVersion,
 				Capabilities:  murli.DefaultCapabilities(),
 				Conventions:   murli.ConventionalVocabulary(),
+				Profiles:      profilesInfo,
 			}
 			for _, child := range rootCmd.Commands() {
 				if child.Hidden || child.Name() == "help" || child.Name() == "describe" {
@@ -85,6 +111,14 @@ func Enable(rootCmd *gocobra.Command) {
 		},
 	}
 	rootCmd.AddCommand(describeCmd)
+
+	// Auto-mount profile subcommand group if not already present.
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "profile" {
+			return
+		}
+	}
+	rootCmd.AddCommand(buildCobraProfileGroup(rootCmd))
 }
 
 func wrapCommands(cmd *gocobra.Command) {
@@ -134,6 +168,8 @@ func wrapCommands(cmd *gocobra.Command) {
 	}
 
 	cmd.RunE = func(c *gocobra.Command, args []string) error {
+		applyCobraProfile(c) // apply stored profile values before anything else
+
 		if ok, _ := c.Flags().GetBool("schema"); ok {
 			return EmitSchema(c)
 		}
@@ -277,4 +313,233 @@ func cobraMetadata(cmd *gocobra.Command) murli.Metadata {
 	var meta murli.Metadata
 	_ = json.Unmarshal([]byte(raw), &meta)
 	return meta
+}
+
+// applyCobraProfile reads the active profile (from --profile flag or store default)
+// and applies stored flag values to root persistent flags that were not explicitly set.
+func applyCobraProfile(c *gocobra.Command) {
+	root := c.Root()
+	store, err := murli.LoadProfileStore(root.Name())
+	if err != nil {
+		return // silent — disk errors must not break normal operation
+	}
+	profileName, _ := root.PersistentFlags().GetString("profile")
+	if profileName == "" {
+		profileName = store.Default
+	}
+	if profileName == "" {
+		return
+	}
+	profile, ok := store.Get(profileName)
+	if !ok {
+		return
+	}
+	for flagName, value := range profile.Flags {
+		f := root.PersistentFlags().Lookup(flagName)
+		if f != nil && !f.Changed {
+			_ = f.Value.Set(value)
+		}
+	}
+}
+
+// collectCobraProfileableFlags returns the set of root persistent flag names
+// marked Profileable: true in the root command's murli metadata.
+func collectCobraProfileableFlags(root *gocobra.Command) map[string]bool {
+	meta := cobraMetadata(root)
+	profileable := make(map[string]bool)
+	for flagName, ann := range meta.FlagAnnotations {
+		if ann.Profileable {
+			profileable[flagName] = true
+		}
+	}
+	return profileable
+}
+
+// buildCobraProfileGroup builds the `profile` command group with save/use/list/show/delete subcommands.
+func buildCobraProfileGroup(root *gocobra.Command) *gocobra.Command {
+	profileCmd := &gocobra.Command{
+		Use:   "profile",
+		Short: "Manage saved flag profiles",
+	}
+
+	// profile save <name>
+	profileCmd.AddCommand(&gocobra.Command{
+		Use:   "save <name>",
+		Short: "Save current profileable flags as a named profile",
+		Args:  gocobra.ExactArgs(1),
+		RunE: func(c *gocobra.Command, args []string) error {
+			name := args[0]
+			w := NewWriter(c)
+			profileable := collectCobraProfileableFlags(root)
+			flags := make(map[string]string)
+			root.PersistentFlags().VisitAll(func(f *pflag.Flag) {
+				if f.Changed && profileable[f.Name] {
+					flags[f.Name] = f.Value.String()
+				}
+			})
+			if len(flags) == 0 {
+				w.WriteError(&murli.AgentError{
+					Code:        murli.ExitUserError,
+					ErrorType:   "user_error",
+					Message:     "no profileable flags were set",
+					Suggestion:  "Pass at least one profileable flag when running profile save. Use --schema to see which flags are profileable.",
+					Recoverable: true,
+				})
+				return nil
+			}
+			store, err := murli.LoadProfileStore(root.Name())
+			if err != nil {
+				w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
+				return nil
+			}
+			store.Set(name, murli.Profile{Flags: flags})
+			if err := store.Save(root.Name()); err != nil {
+				w.WriteError(murli.NewToolError("failed to save profile store: " + err.Error()))
+				return nil
+			}
+			w.WriteSuccess(
+				fmt.Sprintf("Profile %q saved.", name),
+				map[string]any{"profile": name, "flags": flags},
+			)
+			return nil
+		},
+	})
+
+	// profile use <name>
+	profileCmd.AddCommand(&gocobra.Command{
+		Use:   "use <name>",
+		Short: "Set a profile as the default",
+		Args:  gocobra.ExactArgs(1),
+		RunE: func(c *gocobra.Command, args []string) error {
+			name := args[0]
+			w := NewWriter(c)
+			store, err := murli.LoadProfileStore(root.Name())
+			if err != nil {
+				w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
+				return nil
+			}
+			if err := store.SetDefault(name); err != nil {
+				w.WriteError(&murli.AgentError{
+					Code:        murli.ExitNotFound,
+					ErrorType:   "not_found",
+					Message:     fmt.Sprintf("profile %q not found", name),
+					Suggestion:  "Run 'profile list' to see available profiles.",
+					Recoverable: false,
+				})
+				return nil
+			}
+			if err := store.Save(root.Name()); err != nil {
+				w.WriteError(murli.NewToolError("failed to save profile store: " + err.Error()))
+				return nil
+			}
+			w.WriteSuccess(
+				fmt.Sprintf("Profile %q is now the default.", name),
+				map[string]any{"default": name},
+			)
+			return nil
+		},
+	})
+
+	// profile list
+	profileCmd.AddCommand(&gocobra.Command{
+		Use:   "list",
+		Short: "List all saved profiles",
+		RunE: func(c *gocobra.Command, args []string) error {
+			w := NewWriter(c)
+			store, err := murli.LoadProfileStore(root.Name())
+			if err != nil {
+				w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
+				return nil
+			}
+			names := store.Names()
+			payload := map[string]any{"profiles": names}
+			if store.Default != "" {
+				payload["default"] = store.Default
+			}
+			lines := make([]string, 0, len(names))
+			for _, n := range names {
+				if n == store.Default {
+					lines = append(lines, "  "+n+" *")
+				} else {
+					lines = append(lines, "  "+n)
+				}
+			}
+			humanText := strings.Join(lines, "\n")
+			if humanText == "" {
+				humanText = "(no profiles saved)"
+			}
+			w.WriteSuccess(humanText, payload)
+			return nil
+		},
+	})
+
+	// profile show <name>
+	profileCmd.AddCommand(&gocobra.Command{
+		Use:   "show <name>",
+		Short: "Show the flag values in a profile",
+		Args:  gocobra.ExactArgs(1),
+		RunE: func(c *gocobra.Command, args []string) error {
+			name := args[0]
+			w := NewWriter(c)
+			store, err := murli.LoadProfileStore(root.Name())
+			if err != nil {
+				w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
+				return nil
+			}
+			profile, ok := store.Get(name)
+			if !ok {
+				w.WriteError(&murli.AgentError{
+					Code:        murli.ExitNotFound,
+					ErrorType:   "not_found",
+					Message:     fmt.Sprintf("profile %q not found", name),
+					Suggestion:  "Run 'profile list' to see available profiles.",
+					Recoverable: false,
+				})
+				return nil
+			}
+			w.WriteSuccess(
+				fmt.Sprintf("Profile %q: %v", name, profile.Flags),
+				map[string]any{"name": name, "flags": profile.Flags},
+			)
+			return nil
+		},
+	})
+
+	// profile delete <name>
+	profileCmd.AddCommand(&gocobra.Command{
+		Use:   "delete <name>",
+		Short: "Delete a saved profile",
+		Args:  gocobra.ExactArgs(1),
+		RunE: func(c *gocobra.Command, args []string) error {
+			name := args[0]
+			w := NewWriter(c)
+			store, err := murli.LoadProfileStore(root.Name())
+			if err != nil {
+				w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
+				return nil
+			}
+			if _, ok := store.Get(name); !ok {
+				w.WriteError(&murli.AgentError{
+					Code:        murli.ExitNotFound,
+					ErrorType:   "not_found",
+					Message:     fmt.Sprintf("profile %q not found", name),
+					Suggestion:  "Run 'profile list' to see available profiles.",
+					Recoverable: false,
+				})
+				return nil
+			}
+			store.Delete(name)
+			if err := store.Save(root.Name()); err != nil {
+				w.WriteError(murli.NewToolError("failed to save profile store: " + err.Error()))
+				return nil
+			}
+			w.WriteSuccess(
+				fmt.Sprintf("Profile %q deleted.", name),
+				map[string]any{"deleted": name},
+			)
+			return nil
+		},
+	})
+
+	return profileCmd
 }

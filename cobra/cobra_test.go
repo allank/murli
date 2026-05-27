@@ -682,3 +682,422 @@ func TestSafetyBlockInDescribeOutput(t *testing.T) {
 		t.Error("delete safety.dry_run_supported must be true")
 	}
 }
+
+func TestCobraProfileFlagRegistered(t *testing.T) {
+	root := &cobra.Command{Use: "myapp", Short: "test"}
+	murliCobra.Enable(root)
+	if f := root.PersistentFlags().Lookup("profile"); f == nil {
+		t.Error("--profile persistent flag should be registered by Enable()")
+	}
+}
+
+func TestCobraProfileFlagAbsentFromSchema(t *testing.T) {
+	root := &cobra.Command{Use: "myapp", Short: "test"}
+	cmd := &cobra.Command{Use: "get", Short: "get something",
+		RunE: func(cmd *cobra.Command, args []string) error { return nil }}
+	root.AddCommand(cmd)
+	murliCobra.Enable(root)
+
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := murliCobra.EmitSchema(cmd); err != nil {
+		t.Fatalf("EmitSchema: %v", err)
+	}
+	var schema murli.CommandSchema
+	if err := json.Unmarshal(buf.Bytes(), &schema); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, f := range schema.Flags {
+		if f.Name == "profile" {
+			t.Error("--profile must not appear in command schema flags")
+		}
+	}
+}
+
+func TestCobraProfileSavesChangedProfileableFlags(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	root := &cobra.Command{Use: "myapp", Short: "test"}
+	root.PersistentFlags().String("region", "", "Cloud region")
+	root.PersistentFlags().String("token", "", "Auth token")
+	root.PersistentFlags().String("internal", "", "Not profileable")
+
+	murliCobra.Annotate(root, murli.Metadata{
+		FlagAnnotations: map[string]murli.FlagAnnotation{
+			"region": {Profileable: true},
+			"token":  {Profileable: true},
+			// "internal" not annotated → not profileable
+		},
+	})
+	murliCobra.Enable(root)
+
+	outBuf := &bytes.Buffer{}
+	root.SetOut(outBuf)
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"--region", "us-east-1", "--token", "abc", "--internal", "skip", "profile", "save", "prod"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	store, err := murli.LoadProfileStore("myapp")
+	if err != nil {
+		t.Fatalf("LoadProfileStore: %v", err)
+	}
+	p, ok := store.Get("prod")
+	if !ok {
+		t.Fatal("profile 'prod' not found")
+	}
+	if p.Flags["region"] != "us-east-1" {
+		t.Errorf("expected region=us-east-1, got %q", p.Flags["region"])
+	}
+	if p.Flags["token"] != "abc" {
+		t.Errorf("expected token=abc, got %q", p.Flags["token"])
+	}
+	if _, ok := p.Flags["internal"]; ok {
+		t.Error("internal flag must not be saved (not profileable)")
+	}
+}
+
+func TestCobraProfileSaveErrorWhenNoProfileableFlagsSet(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	origExit := murli.ExitFunc
+	var capturedExit int
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = origExit }()
+
+	root := &cobra.Command{Use: "myapp", Short: "test"}
+	root.PersistentFlags().String("region", "", "Cloud region")
+	murliCobra.Annotate(root, murli.Metadata{
+		FlagAnnotations: map[string]murli.FlagAnnotation{
+			"region": {Profileable: true},
+		},
+	})
+	murliCobra.Enable(root)
+
+	errBuf := &bytes.Buffer{}
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(errBuf)
+	// Run without passing --region → no profileable flags changed
+	root.SetArgs([]string{"--agent", "profile", "save", "prod"})
+	_ = root.Execute()
+
+	if capturedExit != murli.ExitUserError {
+		t.Errorf("expected ExitUserError, got %d", capturedExit)
+	}
+}
+
+func TestCobraProfileUseAndListAndShow(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	root := &cobra.Command{Use: "myapp", Short: "test"}
+	root.PersistentFlags().String("region", "", "Cloud region")
+	murliCobra.Annotate(root, murli.Metadata{
+		FlagAnnotations: map[string]murli.FlagAnnotation{
+			"region": {Profileable: true},
+		},
+	})
+	murliCobra.Enable(root)
+
+	// Save a profile first.
+	outBuf := &bytes.Buffer{}
+	root.SetOut(outBuf)
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"--region", "us-east-1", "--agent", "profile", "save", "prod"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// Use the profile.
+	outBuf.Reset()
+	root.SetArgs([]string{"--agent", "profile", "use", "prod"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("use: %v", err)
+	}
+
+	store, _ := murli.LoadProfileStore("myapp")
+	if store.Default != "prod" {
+		t.Errorf("expected default=prod, got %q", store.Default)
+	}
+
+	// List profiles — JSON output.
+	outBuf.Reset()
+	root.SetArgs([]string{"--agent", "profile", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var listResp struct {
+		Status string `json:"status"`
+		Result struct {
+			Profiles []string `json:"profiles"`
+			Default  string   `json:"default"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(outBuf.Bytes(), &listResp); err != nil {
+		t.Fatalf("list unmarshal: %v\nraw: %s", err, outBuf.String())
+	}
+	if listResp.Status != "ok" {
+		t.Errorf("expected status=ok, got %q", listResp.Status)
+	}
+	if len(listResp.Result.Profiles) != 1 || listResp.Result.Profiles[0] != "prod" {
+		t.Errorf("expected [prod], got %v", listResp.Result.Profiles)
+	}
+	if listResp.Result.Default != "prod" {
+		t.Errorf("expected default=prod, got %q", listResp.Result.Default)
+	}
+
+	// Show profile — JSON output.
+	outBuf.Reset()
+	root.SetArgs([]string{"--agent", "profile", "show", "prod"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	var showResp struct {
+		Status string `json:"status"`
+		Result struct {
+			Name  string            `json:"name"`
+			Flags map[string]string `json:"flags"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(outBuf.Bytes(), &showResp); err != nil {
+		t.Fatalf("show unmarshal: %v\nraw: %s", err, outBuf.String())
+	}
+	if showResp.Result.Name != "prod" {
+		t.Errorf("expected name=prod, got %q", showResp.Result.Name)
+	}
+	if showResp.Result.Flags["region"] != "us-east-1" {
+		t.Errorf("expected region=us-east-1, got %q", showResp.Result.Flags["region"])
+	}
+}
+
+func TestCobraProfileUseNotFoundError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	origExit := murli.ExitFunc
+	var capturedExit int
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = origExit }()
+
+	root := &cobra.Command{Use: "myapp", Short: "test"}
+	murliCobra.Enable(root)
+
+	errBuf := &bytes.Buffer{}
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(errBuf)
+	root.SetArgs([]string{"--agent", "profile", "use", "ghost"})
+	_ = root.Execute()
+
+	if capturedExit != murli.ExitNotFound {
+		t.Errorf("expected ExitNotFound (%d), got %d", murli.ExitNotFound, capturedExit)
+	}
+}
+
+func TestCobraProfileDelete(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	origExit := murli.ExitFunc
+	var capturedExit int
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = origExit }()
+
+	root := &cobra.Command{Use: "myapp", Short: "test"}
+	root.PersistentFlags().String("region", "", "region")
+	murliCobra.Annotate(root, murli.Metadata{
+		FlagAnnotations: map[string]murli.FlagAnnotation{"region": {Profileable: true}},
+	})
+	murliCobra.Enable(root)
+
+	// Save then delete.
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"--region", "us-east-1", "profile", "save", "prod"})
+	_ = root.Execute()
+
+	root.SetArgs([]string{"--agent", "profile", "delete", "prod"})
+	_ = root.Execute()
+
+	store, _ := murli.LoadProfileStore("myapp")
+	if _, ok := store.Get("prod"); ok {
+		t.Error("prod should be gone after delete")
+	}
+
+	// Delete non-existent → not_found.
+	capturedExit = 0
+	errBuf := &bytes.Buffer{}
+	root.SetErr(errBuf)
+	root.SetArgs([]string{"--agent", "profile", "delete", "ghost"})
+	_ = root.Execute()
+	if capturedExit != murli.ExitNotFound {
+		t.Errorf("expected ExitNotFound, got %d", capturedExit)
+	}
+}
+
+func TestCobraProfileApplicationAppliesDefaultProfile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	// Pre-save a profile and set it as default.
+	store := &murli.ProfileStore{
+		Default: "staging",
+		Profiles: map[string]murli.Profile{
+			"staging": {Flags: map[string]string{"region": "eu-west-1"}},
+		},
+	}
+	if err := store.Save("myapp"); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	var capturedRegion string
+	root := &cobra.Command{Use: "myapp", Short: "test"}
+	root.PersistentFlags().String("region", "", "Cloud region")
+	listCmd := &cobra.Command{
+		Use: "list",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			capturedRegion, _ = cmd.Flags().GetString("region")
+			return nil
+		},
+	}
+	root.AddCommand(listCmd)
+	murliCobra.Annotate(root, murli.Metadata{
+		FlagAnnotations: map[string]murli.FlagAnnotation{"region": {Profileable: true}},
+	})
+	murliCobra.Enable(root)
+
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if capturedRegion != "eu-west-1" {
+		t.Errorf("expected region=eu-west-1 from default profile, got %q", capturedRegion)
+	}
+}
+
+func TestCobraProfileApplicationExplicitFlagBeatsProfile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	store := &murli.ProfileStore{
+		Default: "staging",
+		Profiles: map[string]murli.Profile{
+			"staging": {Flags: map[string]string{"region": "eu-west-1"}},
+		},
+	}
+	_ = store.Save("myapp")
+
+	var capturedRegion string
+	root := &cobra.Command{Use: "myapp", Short: "test"}
+	root.PersistentFlags().String("region", "", "Cloud region")
+	listCmd := &cobra.Command{
+		Use: "list",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			capturedRegion, _ = cmd.Flags().GetString("region")
+			return nil
+		},
+	}
+	root.AddCommand(listCmd)
+	murliCobra.Annotate(root, murli.Metadata{
+		FlagAnnotations: map[string]murli.FlagAnnotation{"region": {Profileable: true}},
+	})
+	murliCobra.Enable(root)
+
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	// Explicit --region should beat the profile's eu-west-1.
+	root.SetArgs([]string{"--region", "ap-southeast-1", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if capturedRegion != "ap-southeast-1" {
+		t.Errorf("expected ap-southeast-1 (explicit beats profile), got %q", capturedRegion)
+	}
+}
+
+func TestCobraProfileApplicationExplicitProfileFlagOverridesDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	store := &murli.ProfileStore{
+		Default: "staging",
+		Profiles: map[string]murli.Profile{
+			"staging": {Flags: map[string]string{"region": "eu-west-1"}},
+			"prod":    {Flags: map[string]string{"region": "us-east-1"}},
+		},
+	}
+	_ = store.Save("myapp")
+
+	var capturedRegion string
+	root := &cobra.Command{Use: "myapp", Short: "test"}
+	root.PersistentFlags().String("region", "", "Cloud region")
+	listCmd := &cobra.Command{
+		Use: "list",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			capturedRegion, _ = cmd.Flags().GetString("region")
+			return nil
+		},
+	}
+	root.AddCommand(listCmd)
+	murliCobra.Annotate(root, murli.Metadata{
+		FlagAnnotations: map[string]murli.FlagAnnotation{"region": {Profileable: true}},
+	})
+	murliCobra.Enable(root)
+
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	// --profile prod should override the default (staging).
+	root.SetArgs([]string{"--profile", "prod", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if capturedRegion != "us-east-1" {
+		t.Errorf("expected us-east-1 (prod profile), got %q", capturedRegion)
+	}
+}
+
+func TestCobraDescribeIncludesProfilesInfo(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	store := &murli.ProfileStore{
+		Default: "prod",
+		Profiles: map[string]murli.Profile{
+			"prod": {Flags: map[string]string{"region": "us-east-1"}},
+		},
+	}
+	_ = store.Save("myapp")
+
+	root := &cobra.Command{Use: "myapp", Short: "test"}
+	root.PersistentFlags().String("region", "", "Cloud region")
+	murliCobra.Annotate(root, murli.Metadata{
+		FlagAnnotations: map[string]murli.FlagAnnotation{"region": {Profileable: true}},
+	})
+	murliCobra.Enable(root)
+
+	outBuf := &bytes.Buffer{}
+	root.SetOut(outBuf)
+	root.SetArgs([]string{"describe"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var out murli.DescribeOutput
+	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, outBuf.String())
+	}
+
+	if !out.Capabilities.Profiles {
+		t.Error("capabilities.profiles should be true")
+	}
+	if out.Profiles == nil {
+		t.Fatal("profiles field should be present")
+	}
+	if len(out.Profiles.ProfileableFlags) == 0 || out.Profiles.ProfileableFlags[0] != "region" {
+		t.Errorf("profileable_flags should contain region, got %v", out.Profiles.ProfileableFlags)
+	}
+	if len(out.Profiles.Available) != 1 || out.Profiles.Available[0] != "prod" {
+		t.Errorf("available should be [prod], got %v", out.Profiles.Available)
+	}
+	if out.Profiles.Default != "prod" {
+		t.Errorf("default should be prod, got %q", out.Profiles.Default)
+	}
+}
