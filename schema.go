@@ -1,5 +1,15 @@
 package murli
 
+// SafetyBlock summarises the safety properties of a command for agent consumption.
+// Assembled from Metadata fields by the adapter at schema/describe emit time.
+type SafetyBlock struct {
+	ReadOnly    bool `json:"read_only"`
+	Idempotent  bool `json:"idempotent"`
+	Destructive bool `json:"destructive,omitempty"`
+	Reversible  bool `json:"reversible,omitempty"`
+	DryRunnable bool `json:"dry_run_supported,omitempty"`
+}
+
 // CommandSchema is the JSON payload emitted by --schema.
 type CommandSchema struct {
 	Name             string             `json:"name"`
@@ -13,6 +23,7 @@ type CommandSchema struct {
 	Returns          *ReturnSchema      `json:"returns,omitempty"`
 	Examples         []Example          `json:"examples,omitempty"`
 	Subcommands      []SubcommandSchema `json:"subcommands,omitempty"`
+	Safety           SafetyBlock        `json:"safety"`
 }
 
 // FlagSchema represents a single CLI flag in the JSON schema.
@@ -98,6 +109,7 @@ type DescribeCommandSchema struct {
 	Returns          *ReturnSchema           `json:"returns,omitempty"`
 	Examples         []Example               `json:"examples,omitempty"`
 	Subcommands      []DescribeCommandSchema  `json:"subcommands,omitempty"`
+	Safety           SafetyBlock             `json:"safety"`
 }
 
 // DescribeOutput is emitted by the auto-mounted `describe` subcommand.

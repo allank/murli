@@ -944,3 +944,137 @@ func TestCheckConventions_ConventionalVocabulary(t *testing.T) {
 		t.Errorf("expected 'get' in conventional vocabulary")
 	}
 }
+
+func TestSafetyBlockMarshal(t *testing.T) {
+	t.Run("read-only command omits destructive/reversible/dry_run", func(t *testing.T) {
+		sb := SafetyBlock{ReadOnly: true, Idempotent: true}
+		data, err := json.Marshal(sb)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var got map[string]any
+		_ = json.Unmarshal(data, &got)
+		if got["read_only"] != true {
+			t.Errorf("read_only: %v", got["read_only"])
+		}
+		if got["idempotent"] != true {
+			t.Errorf("idempotent: %v", got["idempotent"])
+		}
+		if _, present := got["destructive"]; present {
+			t.Error("destructive must be omitted when false")
+		}
+		if _, present := got["reversible"]; present {
+			t.Error("reversible must be omitted when false")
+		}
+		if _, present := got["dry_run_supported"]; present {
+			t.Error("dry_run_supported must be omitted when false")
+		}
+	})
+
+	t.Run("mutating destructive dryrunnable command includes all fields", func(t *testing.T) {
+		sb := SafetyBlock{
+			ReadOnly:    false,
+			Idempotent:  false,
+			Destructive: true,
+			Reversible:  false,
+			DryRunnable: true,
+		}
+		data, err := json.Marshal(sb)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var got map[string]any
+		_ = json.Unmarshal(data, &got)
+		if got["read_only"] != false {
+			t.Errorf("read_only: %v", got["read_only"])
+		}
+		if got["destructive"] != true {
+			t.Errorf("destructive: %v", got["destructive"])
+		}
+		if _, present := got["reversible"]; present {
+			t.Error("reversible must be omitted when false")
+		}
+		if got["dry_run_supported"] != true {
+			t.Errorf("dry_run_supported: %v", got["dry_run_supported"])
+		}
+	})
+}
+
+func TestCommandSchemaHasSafetyBlock(t *testing.T) {
+	schema := CommandSchema{
+		Name:    "delete",
+		Mutating: true,
+		Safety: SafetyBlock{
+			ReadOnly:    false,
+			Idempotent:  false,
+			Destructive: true,
+			DryRunnable: true,
+		},
+	}
+	data, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(data, &got)
+	safety, ok := got["safety"].(map[string]any)
+	if !ok {
+		t.Fatalf("safety field missing or wrong type in CommandSchema JSON")
+	}
+	if safety["read_only"] != false {
+		t.Errorf("safety.read_only: %v", safety["read_only"])
+	}
+	if safety["destructive"] != true {
+		t.Errorf("safety.destructive: %v", safety["destructive"])
+	}
+	if safety["dry_run_supported"] != true {
+		t.Errorf("safety.dry_run_supported: %v", safety["dry_run_supported"])
+	}
+}
+
+func TestDescribeCommandSchemaHasSafetyBlock(t *testing.T) {
+	schema := DescribeCommandSchema{
+		Name:    "list",
+		Safety: SafetyBlock{ReadOnly: true, Idempotent: true},
+	}
+	data, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(data, &got)
+	safety, ok := got["safety"].(map[string]any)
+	if !ok {
+		t.Fatalf("safety field missing or wrong type in DescribeCommandSchema JSON")
+	}
+	if safety["read_only"] != true {
+		t.Errorf("safety.read_only: %v", safety["read_only"])
+	}
+	if safety["idempotent"] != true {
+		t.Errorf("safety.idempotent: %v", safety["idempotent"])
+	}
+}
+
+func TestMetadataDryRunnableField(t *testing.T) {
+	m := Metadata{
+		Mutating:    true,
+		Destructive: true,
+		DryRunnable: true,
+		Reversible:  false,
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(data, &got)
+	if got["dry_runnable"] != true {
+		t.Errorf("dry_runnable: %v", got["dry_runnable"])
+	}
+	if got["destructive"] != true {
+		t.Errorf("destructive: %v", got["destructive"])
+	}
+	if _, present := got["reversible"]; present {
+		t.Error("reversible must be omitted when false")
+	}
+}

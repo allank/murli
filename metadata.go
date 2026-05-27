@@ -32,6 +32,19 @@ type Metadata struct {
 	// FlagAnnotations provides extended metadata keyed by flag name, for fields that
 	// cannot be auto-detected from the CLI framework (env var binding, enum values, etc.).
 	FlagAnnotations map[string]FlagAnnotation `json:"flag_annotations,omitempty"`
+
+	// DryRunnable marks commands that support --dry-run preview mode.
+	// When true, murli auto-registers a --dry-run flag on this command.
+	// Engineers must check IsDryRun() in their action and call WritePlan() if true.
+	DryRunnable bool `json:"dry_runnable,omitempty"`
+
+	// Destructive marks commands whose effects cannot be undone
+	// (e.g. delete, overwrite, truncate).
+	Destructive bool `json:"destructive,omitempty"`
+
+	// Reversible marks commands that can be undone if something goes wrong
+	// (e.g. the command creates a backup before modifying).
+	Reversible bool `json:"reversible,omitempty"`
 }
 
 // ArgumentMetadata documents a single positional argument.
