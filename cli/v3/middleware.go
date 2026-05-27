@@ -85,7 +85,8 @@ func Wrap(app *cli.Command) {
 	// Auto-mount describe command if not already present.
 	for _, c := range app.Commands {
 		if c.Name == "describe" {
-			// describe already mounted — check if profile subcommand is needed below
+			// describe already mounted by caller — skip describe mounting but still mount profile below.
+			// goto rather than return so both subcommands are mounted independently.
 			goto mountProfile
 		}
 	}
@@ -432,12 +433,12 @@ func buildV3ProfileGroup(app *cli.Command) *cli.Command {
 					}
 					store, err := murli.LoadProfileStore(app.Name)
 					if err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
 						return nil
 					}
 					store.Set(name, murli.Profile{Flags: flags})
 					if err := store.Save(app.Name); err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to save profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to save profile store: " + err.Error()))
 						return nil
 					}
 					w.WriteSuccess(
@@ -459,7 +460,7 @@ func buildV3ProfileGroup(app *cli.Command) *cli.Command {
 					w := NewWriter(c)
 					store, err := murli.LoadProfileStore(app.Name)
 					if err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
 						return nil
 					}
 					if err := store.SetDefault(name); err != nil {
@@ -473,7 +474,7 @@ func buildV3ProfileGroup(app *cli.Command) *cli.Command {
 						return nil
 					}
 					if err := store.Save(app.Name); err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to save profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to save profile store: " + err.Error()))
 						return nil
 					}
 					w.WriteSuccess(
@@ -490,7 +491,7 @@ func buildV3ProfileGroup(app *cli.Command) *cli.Command {
 					w := NewWriter(c)
 					store, err := murli.LoadProfileStore(app.Name)
 					if err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
 						return nil
 					}
 					names := store.Names()
@@ -526,7 +527,7 @@ func buildV3ProfileGroup(app *cli.Command) *cli.Command {
 					w := NewWriter(c)
 					store, err := murli.LoadProfileStore(app.Name)
 					if err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
 						return nil
 					}
 					profile, ok := store.Get(name)
@@ -559,7 +560,7 @@ func buildV3ProfileGroup(app *cli.Command) *cli.Command {
 					w := NewWriter(c)
 					store, err := murli.LoadProfileStore(app.Name)
 					if err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
 						return nil
 					}
 					if _, ok := store.Get(name); !ok {
@@ -574,7 +575,7 @@ func buildV3ProfileGroup(app *cli.Command) *cli.Command {
 					}
 					store.Delete(name)
 					if err := store.Save(app.Name); err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to save profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to save profile store: " + err.Error()))
 						return nil
 					}
 					w.WriteSuccess(

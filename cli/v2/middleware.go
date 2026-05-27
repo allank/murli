@@ -408,7 +408,7 @@ func buildV2ProfileGroup(app *cli.App) *cli.Command {
 						}
 					}
 					if rootCtx == nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "could not find root context"})
+						w.WriteError(murli.NewToolError("could not find root context"))
 						return nil
 					}
 					rootMeta := appMetadataFor(app)
@@ -430,12 +430,12 @@ func buildV2ProfileGroup(app *cli.App) *cli.Command {
 					}
 					store, err := murli.LoadProfileStore(app.Name)
 					if err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
 						return nil
 					}
 					store.Set(name, murli.Profile{Flags: flags})
 					if err := store.Save(app.Name); err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to save profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to save profile store: " + err.Error()))
 						return nil
 					}
 					w.WriteSuccess(
@@ -457,7 +457,7 @@ func buildV2ProfileGroup(app *cli.App) *cli.Command {
 					w := NewWriter(ctx)
 					store, err := murli.LoadProfileStore(app.Name)
 					if err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
 						return nil
 					}
 					if err := store.SetDefault(name); err != nil {
@@ -471,7 +471,7 @@ func buildV2ProfileGroup(app *cli.App) *cli.Command {
 						return nil
 					}
 					if err := store.Save(app.Name); err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to save profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to save profile store: " + err.Error()))
 						return nil
 					}
 					w.WriteSuccess(
@@ -488,7 +488,7 @@ func buildV2ProfileGroup(app *cli.App) *cli.Command {
 					w := NewWriter(ctx)
 					store, err := murli.LoadProfileStore(app.Name)
 					if err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
 						return nil
 					}
 					names := store.Names()
@@ -524,7 +524,7 @@ func buildV2ProfileGroup(app *cli.App) *cli.Command {
 					w := NewWriter(ctx)
 					store, err := murli.LoadProfileStore(app.Name)
 					if err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
 						return nil
 					}
 					profile, ok := store.Get(name)
@@ -557,7 +557,7 @@ func buildV2ProfileGroup(app *cli.App) *cli.Command {
 					w := NewWriter(ctx)
 					store, err := murli.LoadProfileStore(app.Name)
 					if err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to load profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to load profile store: " + err.Error()))
 						return nil
 					}
 					if _, ok := store.Get(name); !ok {
@@ -572,7 +572,7 @@ func buildV2ProfileGroup(app *cli.App) *cli.Command {
 					}
 					store.Delete(name)
 					if err := store.Save(app.Name); err != nil {
-						w.WriteError(&murli.AgentError{Code: murli.ExitToolError, ErrorType: "tool_error", Message: "failed to save profile store: " + err.Error()})
+						w.WriteError(murli.NewToolError("failed to save profile store: " + err.Error()))
 						return nil
 					}
 					w.WriteSuccess(
