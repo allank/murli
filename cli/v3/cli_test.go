@@ -117,8 +117,9 @@ func TestFlagAnnotationInSchemaV3(t *testing.T) {
 
 func TestV3MiddlewareWrapsError(t *testing.T) {
 	var capturedExit int
+	origExit := murli.ExitFunc
 	murli.ExitFunc = func(code int) { capturedExit = code }
-	defer func() { murli.ExitFunc = func(code int) {} }()
+	defer func() { murli.ExitFunc = origExit }()
 
 	capturedExit = -999
 	errBuf := &bytes.Buffer{}
@@ -154,8 +155,9 @@ func TestV3MiddlewareWrapsError(t *testing.T) {
 
 func TestV3MiddlewarePassesThroughAgentError(t *testing.T) {
 	var capturedExit int
+	origExit := murli.ExitFunc
 	murli.ExitFunc = func(code int) { capturedExit = code }
-	defer func() { murli.ExitFunc = func(code int) {} }()
+	defer func() { murli.ExitFunc = origExit }()
 
 	capturedExit = -999
 	errBuf := &bytes.Buffer{}
@@ -197,8 +199,9 @@ func TestV3MiddlewarePassesThroughAgentError(t *testing.T) {
 
 func TestV3MutatingGuardBlocksInAgentMode(t *testing.T) {
 	var capturedExit int
+	origExit := murli.ExitFunc
 	murli.ExitFunc = func(code int) { capturedExit = code }
-	defer func() { murli.ExitFunc = func(code int) {} }()
+	defer func() { murli.ExitFunc = origExit }()
 
 	capturedExit = -999
 	errBuf := &bytes.Buffer{}
@@ -440,8 +443,9 @@ func TestV3MutatingGuardBypassedWithYesFlag(t *testing.T) {
 
 func TestV3ContextCancelledMapsToExitCancelled(t *testing.T) {
 	var capturedExit int
+	origExit := murli.ExitFunc
 	murli.ExitFunc = func(code int) { capturedExit = code }
-	defer func() { murli.ExitFunc = func(code int) {} }()
+	defer func() { murli.ExitFunc = origExit }()
 
 	capturedExit = -999
 	errBuf := &bytes.Buffer{}
@@ -478,8 +482,9 @@ func TestV3ContextCancelledMapsToExitCancelled(t *testing.T) {
 
 func TestV3WrappedContextCancelledDetected(t *testing.T) {
 	var capturedExit int
+	origExit := murli.ExitFunc
 	murli.ExitFunc = func(code int) { capturedExit = code }
-	defer func() { murli.ExitFunc = func(code int) {} }()
+	defer func() { murli.ExitFunc = origExit }()
 
 	capturedExit = -999
 	errBuf := &bytes.Buffer{}
@@ -506,8 +511,9 @@ func TestV3WrappedContextCancelledDetected(t *testing.T) {
 
 func TestV3DeadlineExceededMapsToExitTimeout(t *testing.T) {
 	var capturedExit int
+	origExit := murli.ExitFunc
 	murli.ExitFunc = func(code int) { capturedExit = code }
-	defer func() { murli.ExitFunc = func(code int) {} }()
+	defer func() { murli.ExitFunc = origExit }()
 
 	capturedExit = -999
 	errBuf := &bytes.Buffer{}
@@ -600,5 +606,39 @@ func TestV3InfraFlagsAbsentFromSchema(t *testing.T) {
 		if infraFlags[f.Name] {
 			t.Errorf("infrastructure flag %q must not appear in schema flags list", f.Name)
 		}
+	}
+}
+
+func TestV3RunEntryPointStructuredErrorOnFlagParse(t *testing.T) {
+	var capturedExit int
+	origExit := murli.ExitFunc
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = origExit }()
+
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	app := &cli.Command{
+		Name:      "myapp",
+		Writer:    outBuf,
+		ErrWriter: errBuf,
+		Commands: []*cli.Command{
+			{
+				Name:  "hello",
+				Flags: []cli.Flag{&cli.StringFlag{Name: "name"}},
+				Action: func(ctx context.Context, c *cli.Command) error {
+					return nil
+				},
+			},
+		},
+	}
+
+	// Run returns nil (swallowed), error written to stderr via rootWriter.
+	result := murliCLI.Run(app, []string{"myapp", "hello", "--unknown-xyz"})
+	if result != nil {
+		t.Errorf("Run() should return nil after writing structured error, got: %v", result)
+	}
+	// Verify that an exit was called due to the flag parse error.
+	if capturedExit == 0 {
+		t.Errorf("Run() should have called ExitFunc with non-zero code on flag parse error, got: %d", capturedExit)
 	}
 }

@@ -34,6 +34,9 @@ func Run(app *cli.Command, args []string) error {
 
 // Wrap injects --schema and --agent flags and wraps all command Actions.
 func Wrap(app *cli.Command) {
+	// Suppress urfave/cli's built-in error printing so murli controls all stderr output.
+	app.ExitErrHandler = func(_ context.Context, _ *cli.Command, _ error) {}
+
 	wrapCommands(app.Commands, app)
 
 	// Naming convention advisory: collect names, emit warnings if TTY.
