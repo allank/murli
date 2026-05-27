@@ -24,6 +24,13 @@ func EmitSchema(cmd *cli.Command, w io.Writer) error {
 		Arguments:        meta.Arguments,
 		Flags:            v2FlagSchemas(cmd.Flags, meta.FlagAnnotations),
 		Subcommands:      v2SubcommandSchemas(cmd.Subcommands),
+		Safety: murli.SafetyBlock{
+			ReadOnly:    !meta.Mutating,
+			Idempotent:  meta.Idempotent,
+			Destructive: meta.Destructive,
+			Reversible:  meta.Reversible,
+			DryRunnable: meta.DryRunnable,
+		},
 	}
 
 	enc := json.NewEncoder(w)
@@ -33,7 +40,10 @@ func EmitSchema(cmd *cli.Command, w io.Writer) error {
 }
 
 func v2FlagSchemas(flags []cli.Flag, annotations map[string]murli.FlagAnnotation) []murli.FlagSchema {
-	skipped := map[string]bool{"schema": true, "agent": true, "output": true, "protocol-version": true}
+	skipped := map[string]bool{
+		"schema": true, "agent": true, "output": true, "protocol-version": true,
+		"force": true, "yes": true, "dry-run": true,
+	}
 	var list []murli.FlagSchema
 	for _, f := range flags {
 		names := f.Names()
@@ -135,6 +145,13 @@ func BuildV2DescribeTree(cmd *cli.Command) murli.DescribeCommandSchema {
 		Examples:         meta.Examples,
 		Arguments:        meta.Arguments,
 		Flags:            v2FlagSchemas(cmd.Flags, meta.FlagAnnotations),
+		Safety: murli.SafetyBlock{
+			ReadOnly:    !meta.Mutating,
+			Idempotent:  meta.Idempotent,
+			Destructive: meta.Destructive,
+			Reversible:  meta.Reversible,
+			DryRunnable: meta.DryRunnable,
+		},
 	}
 	for _, child := range cmd.Subcommands {
 		if child.Hidden || child.Name == "describe" {

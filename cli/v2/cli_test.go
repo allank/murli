@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -322,4 +323,238 @@ func TestV2SchemaFlag(t *testing.T) {
 	}
 
 	_ = os.Stdout
+}
+
+func TestV2DryRunFlagRegisteredOnDryRunnableCommand(t *testing.T) {
+	app := &cli.App{
+		Name: "testapp",
+		Commands: []*cli.Command{
+			{Name: "delete", Action: func(ctx *cli.Context) error { return nil }},
+		},
+	}
+	murliCLI.Annotate(app.Commands[0], murli.Metadata{Mutating: true, DryRunnable: true})
+	murliCLI.Wrap(app)
+
+	var found bool
+	for _, f := range app.Commands[0].Flags {
+		for _, name := range f.Names() {
+			if name == "dry-run" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("--dry-run must be registered on DryRunnable commands")
+	}
+}
+
+func TestV2DryRunFlagNotRegisteredOnNonDryRunnableCommand(t *testing.T) {
+	app := &cli.App{
+		Name: "testapp",
+		Commands: []*cli.Command{
+			{Name: "delete", Action: func(ctx *cli.Context) error { return nil }},
+		},
+	}
+	murliCLI.Annotate(app.Commands[0], murli.Metadata{Mutating: true})
+	murliCLI.Wrap(app)
+
+	for _, f := range app.Commands[0].Flags {
+		for _, name := range f.Names() {
+			if name == "dry-run" {
+				t.Error("--dry-run must NOT be registered on non-DryRunnable commands")
+			}
+		}
+	}
+}
+
+func TestV2ForceFlagsRegisteredOnMutatingCommand(t *testing.T) {
+	app := &cli.App{
+		Name: "testapp",
+		Commands: []*cli.Command{
+			{Name: "delete", Action: func(ctx *cli.Context) error { return nil }},
+		},
+	}
+	murliCLI.Annotate(app.Commands[0], murli.Metadata{Mutating: true})
+	murliCLI.Wrap(app)
+
+	var forceFound, yesFound bool
+	for _, f := range app.Commands[0].Flags {
+		for _, name := range f.Names() {
+			if name == "force" {
+				forceFound = true
+			}
+			if name == "yes" {
+				yesFound = true
+			}
+		}
+	}
+	if !forceFound {
+		t.Error("--force must be registered on Mutating commands")
+	}
+	if !yesFound {
+		t.Error("--yes must be registered on Mutating commands")
+	}
+}
+
+func TestV2MutatingGuardBypassedWithForceFlag(t *testing.T) {
+	ran := false
+	errBuf := &bytes.Buffer{}
+	app := &cli.App{
+		Name:      "testapp",
+		ErrWriter: errBuf,
+		Commands: []*cli.Command{
+			{
+				Name: "delete",
+				Action: func(ctx *cli.Context) error { ran = true; return nil },
+			},
+		},
+	}
+	murliCLI.Annotate(app.Commands[0], murli.Metadata{Mutating: true})
+	murliCLI.Wrap(app)
+	_ = app.Run([]string{"testapp", "delete", "--force"})
+
+	if !ran {
+		t.Error("Action must run when --force is passed (guard bypassed)")
+	}
+}
+
+func TestV2ContextCancelledMapsToExitCancelled(t *testing.T) {
+	var capturedExit int
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = func(code int) {} }()
+
+	capturedExit = -999
+	errBuf := &bytes.Buffer{}
+
+	app := &cli.App{
+		Name:      "testapp",
+		ErrWriter: errBuf,
+		Commands: []*cli.Command{
+			{
+				Name: "work",
+				Action: func(ctx *cli.Context) error {
+					return context.Canceled
+				},
+			},
+		},
+	}
+	murliCLI.Wrap(app)
+	_ = app.Run([]string{"testapp", "work"})
+
+	if capturedExit != murli.ExitCancelled {
+		t.Errorf("exit code: want %d (ExitCancelled), got %d", murli.ExitCancelled, capturedExit)
+	}
+	var resp murli.AgentError
+	if err := json.Unmarshal(errBuf.Bytes(), &resp); err != nil {
+		t.Fatalf("not valid JSON: %v\nraw: %s", err, errBuf.String())
+	}
+	if resp.ErrorType != "cancelled" {
+		t.Errorf("error_type: want %q, got %q", "cancelled", resp.ErrorType)
+	}
+	if resp.Recoverable {
+		t.Error("cancelled error must not be Recoverable")
+	}
+}
+
+func TestV2DeadlineExceededMapsToExitTimeout(t *testing.T) {
+	var capturedExit int
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = func(code int) {} }()
+
+	capturedExit = -999
+	errBuf := &bytes.Buffer{}
+
+	app := &cli.App{
+		Name:      "testapp",
+		ErrWriter: errBuf,
+		Commands: []*cli.Command{
+			{
+				Name: "work",
+				Action: func(ctx *cli.Context) error {
+					return context.DeadlineExceeded
+				},
+			},
+		},
+	}
+	murliCLI.Wrap(app)
+	_ = app.Run([]string{"testapp", "work"})
+
+	if capturedExit != murli.ExitTimeout {
+		t.Errorf("exit code: want %d (ExitTimeout), got %d", murli.ExitTimeout, capturedExit)
+	}
+	var resp murli.AgentError
+	if err := json.Unmarshal(errBuf.Bytes(), &resp); err != nil {
+		t.Fatalf("not valid JSON: %v\nraw: %s", err, errBuf.String())
+	}
+	if resp.ErrorType != "timeout" {
+		t.Errorf("error_type: want %q, got %q", "timeout", resp.ErrorType)
+	}
+	if !resp.Recoverable {
+		t.Error("timeout error must be Recoverable")
+	}
+}
+
+func TestV2SafetyBlockInSchema(t *testing.T) {
+	cmd := &cli.Command{
+		Name:   "delete",
+		Usage:  "Delete a resource",
+		Action: func(ctx *cli.Context) error { return nil },
+	}
+	murliCLI.Annotate(cmd, murli.Metadata{
+		Mutating:    true,
+		Destructive: true,
+		DryRunnable: true,
+	})
+
+	buf := &bytes.Buffer{}
+	if err := murliCLI.EmitSchema(cmd, buf); err != nil {
+		t.Fatalf("EmitSchema: %v", err)
+	}
+
+	var schema murli.CommandSchema
+	if err := json.Unmarshal(buf.Bytes(), &schema); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, buf.String())
+	}
+
+	if schema.Safety.ReadOnly {
+		t.Error("safety.read_only must be false for Mutating command")
+	}
+	if !schema.Safety.Destructive {
+		t.Error("safety.destructive must be true")
+	}
+	if !schema.Safety.DryRunnable {
+		t.Error("safety.dry_run_supported must be true")
+	}
+}
+
+func TestV2InfraFlagsAbsentFromSchema(t *testing.T) {
+	app := &cli.App{
+		Name: "testapp",
+		Commands: []*cli.Command{
+			{
+				Name:   "delete",
+				Action: func(ctx *cli.Context) error { return nil },
+			},
+		},
+	}
+	murliCLI.Annotate(app.Commands[0], murli.Metadata{Mutating: true, DryRunnable: true})
+	murliCLI.Wrap(app)
+
+	buf := &bytes.Buffer{}
+	if err := murliCLI.EmitSchema(app.Commands[0], buf); err != nil {
+		t.Fatalf("EmitSchema: %v", err)
+	}
+
+	var schema murli.CommandSchema
+	if err := json.Unmarshal(buf.Bytes(), &schema); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, buf.String())
+	}
+
+	infraFlags := map[string]bool{"force": true, "yes": true, "dry-run": true,
+		"schema": true, "agent": true, "output": true, "protocol-version": true}
+	for _, f := range schema.Flags {
+		if infraFlags[f.Name] {
+			t.Errorf("infrastructure flag %q must not appear in schema flags list", f.Name)
+		}
+	}
 }
