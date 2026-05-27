@@ -31,6 +31,13 @@ func EmitSchema(cmd *gocobra.Command) error {
 		Arguments:        mergeArguments(cmd.Use, meta.Arguments),
 		Flags:            getFlagSchemas(cmd, meta.FlagAnnotations),
 		Subcommands:      getSubcommandSchemas(cmd),
+		Safety: murli.SafetyBlock{
+			ReadOnly:    !meta.Mutating,
+			Idempotent:  meta.Idempotent,
+			Destructive: meta.Destructive,
+			Reversible:  meta.Reversible,
+			DryRunnable: meta.DryRunnable,
+		},
 	}
 
 	enc := json.NewEncoder(cmd.OutOrStdout())
@@ -91,7 +98,8 @@ func mergeArguments(use string, customArgs []murli.ArgumentMetadata) []murli.Arg
 func getFlagSchemas(cmd *gocobra.Command, annotations map[string]murli.FlagAnnotation) []murli.FlagSchema {
 	var list []murli.FlagSchema
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		if f.Name == "schema" || f.Name == "agent" || f.Name == "output" || f.Name == "protocol-version" {
+		if f.Name == "schema" || f.Name == "agent" || f.Name == "output" || f.Name == "protocol-version" ||
+			f.Name == "force" || f.Name == "yes" || f.Name == "dry-run" {
 			return
 		}
 		t := f.Value.Type()
@@ -144,6 +152,13 @@ func BuildDescribeTree(cmd *gocobra.Command) murli.DescribeCommandSchema {
 		Examples:         meta.Examples,
 		Arguments:        mergeArguments(cmd.Use, meta.Arguments),
 		Flags:            getFlagSchemas(cmd, meta.FlagAnnotations),
+		Safety: murli.SafetyBlock{
+			ReadOnly:    !meta.Mutating,
+			Idempotent:  meta.Idempotent,
+			Destructive: meta.Destructive,
+			Reversible:  meta.Reversible,
+			DryRunnable: meta.DryRunnable,
+		},
 	}
 
 	for _, child := range cmd.Commands() {

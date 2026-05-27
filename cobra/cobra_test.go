@@ -2,8 +2,10 @@ package cobra_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -358,4 +360,325 @@ func TestMiddlewareInterception(t *testing.T) {
 			t.Errorf("incorrect flag error: %+v", resp)
 		}
 	})
+}
+
+func TestDryRunFlagRegisteredOnDryRunnableCommand(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete a resource",
+		RunE:  func(c *cobra.Command, args []string) error { return nil },
+	}
+	murliCobra.Annotate(cmd, murli.Metadata{
+		Mutating:    true,
+		DryRunnable: true,
+	})
+	murliCobra.Enable(cmd)
+
+	if cmd.Flags().Lookup("dry-run") == nil {
+		t.Error("--dry-run must be registered on DryRunnable commands")
+	}
+}
+
+func TestDryRunFlagNotRegisteredOnNonDryRunnableCommand(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:  "delete",
+		RunE: func(c *cobra.Command, args []string) error { return nil },
+	}
+	murliCobra.Annotate(cmd, murli.Metadata{Mutating: true}) // DryRunnable not set
+	murliCobra.Enable(cmd)
+
+	if cmd.Flags().Lookup("dry-run") != nil {
+		t.Error("--dry-run must NOT be registered on non-DryRunnable commands")
+	}
+}
+
+func TestForceFlagsRegisteredOnMutatingCommand(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:  "delete",
+		RunE: func(c *cobra.Command, args []string) error { return nil },
+	}
+	murliCobra.Annotate(cmd, murli.Metadata{Mutating: true})
+	murliCobra.Enable(cmd)
+
+	if cmd.Flags().Lookup("force") == nil {
+		t.Error("--force must be registered on Mutating commands")
+	}
+	if cmd.Flags().Lookup("yes") == nil {
+		t.Error("--yes must be registered on Mutating commands")
+	}
+}
+
+func TestForceFlagsNotRegisteredOnReadOnlyCommand(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:  "list",
+		RunE: func(c *cobra.Command, args []string) error { return nil },
+	}
+	murliCobra.Annotate(cmd, murli.Metadata{Mutating: false})
+	murliCobra.Enable(cmd)
+
+	if cmd.Flags().Lookup("force") != nil {
+		t.Error("--force must NOT be registered on read-only commands")
+	}
+}
+
+func TestMutatingGuardBypassedWithForceFlag(t *testing.T) {
+	ran := false
+	cmd := &cobra.Command{
+		Use:  "delete",
+		RunE: func(c *cobra.Command, args []string) error { ran = true; return nil },
+	}
+	murliCobra.Annotate(cmd, murli.Metadata{Mutating: true})
+	murliCobra.Enable(cmd)
+	outBuf, errBuf := &bytes.Buffer{}, &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetErr(errBuf)
+	cmd.SetArgs([]string{"--force"})
+	_ = cmd.Execute()
+
+	if !ran {
+		t.Error("RunE must run when --force is passed (guard bypassed)")
+	}
+}
+
+func TestMutatingGuardBypassedWithYesFlag(t *testing.T) {
+	ran := false
+	cmd := &cobra.Command{
+		Use:  "delete",
+		RunE: func(c *cobra.Command, args []string) error { ran = true; return nil },
+	}
+	murliCobra.Annotate(cmd, murli.Metadata{Mutating: true})
+	murliCobra.Enable(cmd)
+	outBuf, errBuf := &bytes.Buffer{}, &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetErr(errBuf)
+	cmd.SetArgs([]string{"--yes"})
+	_ = cmd.Execute()
+
+	if !ran {
+		t.Error("RunE must run when --yes is passed (guard bypassed)")
+	}
+}
+
+func TestContextCancelledMapsToExitCancelled(t *testing.T) {
+	var capturedExit int
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = func(code int) {} }()
+
+	capturedExit = -999
+	errBuf := &bytes.Buffer{}
+
+	cmd := &cobra.Command{
+		Use: "work",
+		RunE: func(c *cobra.Command, args []string) error {
+			return context.Canceled
+		},
+	}
+	murliCobra.Enable(cmd)
+	cmd.SetErr(errBuf)
+	_ = cmd.Execute()
+
+	if capturedExit != murli.ExitCancelled {
+		t.Errorf("exit code: want %d (ExitCancelled), got %d", murli.ExitCancelled, capturedExit)
+	}
+	var resp murli.AgentError
+	if err := json.Unmarshal(errBuf.Bytes(), &resp); err != nil {
+		t.Fatalf("not valid JSON: %v\nraw: %s", err, errBuf.String())
+	}
+	if resp.ErrorType != "cancelled" {
+		t.Errorf("error_type: want %q, got %q", "cancelled", resp.ErrorType)
+	}
+	if resp.Recoverable {
+		t.Error("cancelled error must not be Recoverable")
+	}
+}
+
+func TestWrappedContextCancelledDetected(t *testing.T) {
+	var capturedExit int
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = func(code int) {} }()
+
+	capturedExit = -999
+	errBuf := &bytes.Buffer{}
+
+	cmd := &cobra.Command{
+		Use: "work",
+		RunE: func(c *cobra.Command, args []string) error {
+			return fmt.Errorf("operation failed: %w", context.Canceled)
+		},
+	}
+	murliCobra.Enable(cmd)
+	cmd.SetErr(errBuf)
+	_ = cmd.Execute()
+
+	if capturedExit != murli.ExitCancelled {
+		t.Errorf("exit code: want %d (ExitCancelled), got %d", murli.ExitCancelled, capturedExit)
+	}
+}
+
+func TestDeadlineExceededMapsToExitTimeout(t *testing.T) {
+	var capturedExit int
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = func(code int) {} }()
+
+	capturedExit = -999
+	errBuf := &bytes.Buffer{}
+
+	cmd := &cobra.Command{
+		Use: "work",
+		RunE: func(c *cobra.Command, args []string) error {
+			return context.DeadlineExceeded
+		},
+	}
+	murliCobra.Enable(cmd)
+	cmd.SetErr(errBuf)
+	_ = cmd.Execute()
+
+	if capturedExit != murli.ExitTimeout {
+		t.Errorf("exit code: want %d (ExitTimeout), got %d", murli.ExitTimeout, capturedExit)
+	}
+	var resp murli.AgentError
+	if err := json.Unmarshal(errBuf.Bytes(), &resp); err != nil {
+		t.Fatalf("not valid JSON: %v\nraw: %s", err, errBuf.String())
+	}
+	if resp.ErrorType != "timeout" {
+		t.Errorf("error_type: want %q, got %q", "timeout", resp.ErrorType)
+	}
+	if !resp.Recoverable {
+		t.Error("timeout error must be Recoverable")
+	}
+}
+
+func TestSafetyBlockInSchema(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete a resource",
+		RunE:  func(c *cobra.Command, args []string) error { return nil },
+	}
+	murliCobra.Annotate(cmd, murli.Metadata{
+		Mutating:    true,
+		Destructive: true,
+		DryRunnable: true,
+	})
+
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := murliCobra.EmitSchema(cmd); err != nil {
+		t.Fatalf("EmitSchema: %v", err)
+	}
+
+	var schema murli.CommandSchema
+	if err := json.Unmarshal(buf.Bytes(), &schema); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, buf.String())
+	}
+
+	if schema.Safety.ReadOnly {
+		t.Error("safety.read_only must be false for Mutating command")
+	}
+	if !schema.Safety.Destructive {
+		t.Error("safety.destructive must be true")
+	}
+	if !schema.Safety.DryRunnable {
+		t.Error("safety.dry_run_supported must be true")
+	}
+}
+
+func TestSafetyBlockReadOnlyInSchema(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:  "list",
+		RunE: func(c *cobra.Command, args []string) error { return nil },
+	}
+	murliCobra.Annotate(cmd, murli.Metadata{Mutating: false, Idempotent: true})
+
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := murliCobra.EmitSchema(cmd); err != nil {
+		t.Fatalf("EmitSchema: %v", err)
+	}
+
+	var schema murli.CommandSchema
+	if err := json.Unmarshal(buf.Bytes(), &schema); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, buf.String())
+	}
+
+	if !schema.Safety.ReadOnly {
+		t.Error("safety.read_only must be true for non-Mutating command")
+	}
+	if !schema.Safety.Idempotent {
+		t.Error("safety.idempotent must be true")
+	}
+}
+
+func TestInfraFlagsAbsentFromSchema(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:  "delete",
+		RunE: func(c *cobra.Command, args []string) error { return nil },
+	}
+	murliCobra.Annotate(cmd, murli.Metadata{Mutating: true, DryRunnable: true})
+	murliCobra.Enable(cmd)
+
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := murliCobra.EmitSchema(cmd); err != nil {
+		t.Fatalf("EmitSchema: %v", err)
+	}
+
+	var schema murli.CommandSchema
+	if err := json.Unmarshal(buf.Bytes(), &schema); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, buf.String())
+	}
+
+	infraFlags := map[string]bool{"force": true, "yes": true, "dry-run": true,
+		"schema": true, "agent": true, "output": true, "protocol-version": true}
+	for _, f := range schema.Flags {
+		if infraFlags[f.Name] {
+			t.Errorf("infrastructure flag %q must not appear in schema flags list", f.Name)
+		}
+	}
+}
+
+func TestSafetyBlockInDescribeOutput(t *testing.T) {
+	root := &cobra.Command{Use: "app", Short: "Test app"}
+	deleteCmd := &cobra.Command{
+		Use:  "delete",
+		RunE: func(c *cobra.Command, args []string) error { return nil },
+	}
+	murliCobra.Annotate(deleteCmd, murli.Metadata{
+		Mutating:    true,
+		Destructive: true,
+		DryRunnable: true,
+	})
+	root.AddCommand(deleteCmd)
+	murliCobra.Enable(root)
+
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	root.SetArgs([]string{"describe"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var out murli.DescribeOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, buf.String())
+	}
+
+	var deleteFound *murli.DescribeCommandSchema
+	for i := range out.Commands {
+		if out.Commands[i].Name == "delete" {
+			deleteFound = &out.Commands[i]
+			break
+		}
+	}
+	if deleteFound == nil {
+		t.Fatal("delete command not found in describe output")
+	}
+	if deleteFound.Safety.ReadOnly {
+		t.Error("delete safety.read_only must be false")
+	}
+	if !deleteFound.Safety.Destructive {
+		t.Error("delete safety.destructive must be true")
+	}
+	if !deleteFound.Safety.DryRunnable {
+		t.Error("delete safety.dry_run_supported must be true")
+	}
 }

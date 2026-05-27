@@ -1,7 +1,9 @@
 package cobra
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -104,6 +106,23 @@ func wrapCommands(cmd *gocobra.Command) {
 		return nil
 	})
 
+	// Register --force and --yes on mutating commands.
+	meta := cobraMetadata(cmd)
+	if meta.Mutating {
+		if cmd.Flags().Lookup("force") == nil {
+			cmd.Flags().Bool("force", false, "Bypass the non-interactive mutation guard")
+		}
+		if cmd.Flags().Lookup("yes") == nil {
+			cmd.Flags().Bool("yes", false, "Bypass the non-interactive mutation guard")
+		}
+	}
+	// Register --dry-run on DryRunnable commands.
+	if meta.DryRunnable {
+		if cmd.Flags().Lookup("dry-run") == nil {
+			cmd.Flags().Bool("dry-run", false, "Preview the operation without executing it")
+		}
+	}
+
 	if cmd.Args != nil {
 		orig := cmd.Args
 		cmd.Args = func(c *gocobra.Command, args []string) error {
@@ -166,12 +185,12 @@ func wrapCommands(cmd *gocobra.Command) {
 		}
 
 		// Non-interactive guard: mutating commands must not block waiting for input.
-		if meta := cobraMetadata(c); meta.Mutating && !w.IsTTY() {
+		if meta := cobraMetadata(c); meta.Mutating && !w.IsTTY() && !w.IsForced() {
 			w.WriteError(&murli.AgentError{
 				Code:        murli.ExitUserError,
 				ErrorType:   "confirmation_required",
 				Message:     "This command mutates state and requires explicit confirmation.",
-				Suggestion:  "Mutation requires confirmation. Use a TTY (interactive terminal) to run this command, or wait for --force support in a future release.",
+				Suggestion:  "Pass --force or --yes to proceed without a TTY.",
 				Recoverable: true,
 			})
 			return nil
@@ -194,6 +213,20 @@ func wrapCommands(cmd *gocobra.Command) {
 			}
 			if agentErr, ok := runErr.(*murli.AgentError); ok {
 				w.WriteError(agentErr)
+			} else if errors.Is(runErr, context.Canceled) {
+				w.WriteError(&murli.AgentError{
+					Code:        murli.ExitCancelled,
+					ErrorType:   "cancelled",
+					Message:     runErr.Error(),
+					Recoverable: false,
+				})
+			} else if errors.Is(runErr, context.DeadlineExceeded) {
+				w.WriteError(&murli.AgentError{
+					Code:        murli.ExitTimeout,
+					ErrorType:   "timeout",
+					Message:     runErr.Error(),
+					Recoverable: true,
+				})
 			} else {
 				w.WriteError(&murli.AgentError{
 					Code:        murli.ExitToolError,
