@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -107,6 +108,21 @@ func wrapCommands(cmds []*cli.Command, root *cli.Command) {
 			&cli.StringFlag{Name: "protocol-version", Usage: "Protocol version for envelope shaping (0.1|0.2)"},
 		)
 
+		// Register --force and --yes on mutating commands.
+		meta := metadataFor(cmd)
+		if meta.Mutating {
+			cmd.Flags = append(cmd.Flags,
+				&cli.BoolFlag{Name: "force", Usage: "Bypass the non-interactive mutation guard"},
+				&cli.BoolFlag{Name: "yes", Usage: "Bypass the non-interactive mutation guard"},
+			)
+		}
+		// Register --dry-run on DryRunnable commands.
+		if meta.DryRunnable {
+			cmd.Flags = append(cmd.Flags,
+				&cli.BoolFlag{Name: "dry-run", Usage: "Preview the operation without executing it"},
+			)
+		}
+
 		originalAction := cmd.Action
 		currentCmd := cmd
 
@@ -163,12 +179,12 @@ func wrapCommands(cmds []*cli.Command, root *cli.Command) {
 			}
 
 			// Non-interactive guard.
-			if meta := metadataFor(currentCmd); meta.Mutating && !w.IsTTY() {
+			if meta := metadataFor(currentCmd); meta.Mutating && !w.IsTTY() && !w.IsForced() {
 				w.WriteError(&murli.AgentError{
 					Code:        murli.ExitUserError,
 					ErrorType:   "confirmation_required",
 					Message:     "This command mutates state and requires explicit confirmation.",
-					Suggestion:  "Mutation requires confirmation. Use a TTY (interactive terminal) to run this command, or wait for --force support in a future release.",
+					Suggestion:  "Pass --force or --yes to proceed without a TTY.",
 					Recoverable: true,
 				})
 				return nil
@@ -187,6 +203,20 @@ func wrapCommands(cmds []*cli.Command, root *cli.Command) {
 				}
 				if agentErr, ok := runErr.(*murli.AgentError); ok {
 					w.WriteError(agentErr)
+				} else if errors.Is(runErr, context.Canceled) {
+					w.WriteError(&murli.AgentError{
+						Code:        murli.ExitCancelled,
+						ErrorType:   "cancelled",
+						Message:     runErr.Error(),
+						Recoverable: false,
+					})
+				} else if errors.Is(runErr, context.DeadlineExceeded) {
+					w.WriteError(&murli.AgentError{
+						Code:        murli.ExitTimeout,
+						ErrorType:   "timeout",
+						Message:     runErr.Error(),
+						Recoverable: true,
+					})
 				} else {
 					w.WriteError(&murli.AgentError{
 						Code:        murli.ExitToolError,

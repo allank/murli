@@ -13,6 +13,14 @@ func NewWriter(cmd *cli.Command) *murli.Writer {
 	agentMode := cmd.Bool("agent")
 	outputFlag := cmd.String("output")
 	protocolFlag := cmd.String("protocol-version")
+
+	// Force flags — present only on Mutating commands; default false if not registered.
+	forceFlag := cmd.Bool("force")
+	yesFlag := cmd.Bool("yes")
+
+	// Dry-run flag — present only on DryRunnable commands; default false if not registered.
+	dryRunFlag := cmd.Bool("dry-run")
+
 	stdout := writerOrDefault(cmd.Root().Writer, os.Stdout)
 	stderr := writerOrDefault(cmd.Root().ErrWriter, os.Stderr)
 	return murli.NewWriter(
@@ -21,6 +29,8 @@ func NewWriter(cmd *cli.Command) *murli.Writer {
 		agentMode,
 		murli.WithOutputFormat(murli.OutputFormat(outputFlag)),
 		murli.WithProtocolVersion(protocolFlag),
+		murli.WithForce(forceFlag || yesFlag),
+		murli.WithDryRun(dryRunFlag),
 	)
 }
 
