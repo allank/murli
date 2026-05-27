@@ -42,7 +42,7 @@ func EmitSchema(cmd *cli.Command, w io.Writer) error {
 func v2FlagSchemas(flags []cli.Flag, annotations map[string]murli.FlagAnnotation) []murli.FlagSchema {
 	skipped := map[string]bool{
 		"schema": true, "agent": true, "output": true, "protocol-version": true,
-		"force": true, "yes": true, "dry-run": true,
+		"force": true, "yes": true, "dry-run": true, "profile": true,
 	}
 	var list []murli.FlagSchema
 	for _, f := range flags {

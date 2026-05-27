@@ -662,3 +662,198 @@ func TestV2SafetyBlockInDescribeOutput(t *testing.T) {
 		t.Error("delete safety.dry_run_supported must be true")
 	}
 }
+
+func TestV2ProfileFlagRegistered(t *testing.T) {
+	app := &cli.App{Name: "myapp", Writer: &bytes.Buffer{}}
+	murliCLI.Wrap(app)
+	for _, f := range app.Flags {
+		if names := f.Names(); len(names) > 0 && names[0] == "profile" {
+			return
+		}
+	}
+	t.Error("--profile flag should be registered on app.Flags by Wrap()")
+}
+
+func TestV2ProfileFlagAbsentFromSchema(t *testing.T) {
+	outBuf := &bytes.Buffer{}
+	app := &cli.App{
+		Name:   "myapp",
+		Writer: outBuf,
+		Commands: []*cli.Command{
+			{Name: "get", Usage: "get something",
+				Action: func(ctx *cli.Context) error { return nil }},
+		},
+	}
+	murliCLI.Wrap(app)
+	if err := app.Run([]string{"myapp", "get", "--schema"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var schema murli.CommandSchema
+	if err := json.Unmarshal(outBuf.Bytes(), &schema); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, outBuf.String())
+	}
+	for _, f := range schema.Flags {
+		if f.Name == "profile" {
+			t.Error("--profile must not appear in command schema flags")
+		}
+	}
+}
+
+func TestV2ProfileSavesChangedProfileableFlags(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	outBuf := &bytes.Buffer{}
+	app := &cli.App{
+		Name:   "myapp",
+		Writer: outBuf,
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "region", Usage: "Cloud region"},
+			&cli.StringFlag{Name: "token", Usage: "Auth token"},
+		},
+	}
+	murliCLI.AnnotateApp(app, murli.Metadata{
+		FlagAnnotations: map[string]murli.FlagAnnotation{
+			"region": {Profileable: true},
+			"token":  {Profileable: true},
+		},
+	})
+	murliCLI.Wrap(app)
+
+	if err := app.Run([]string{"myapp", "--region", "us-east-1", "--token", "abc", "--agent", "profile", "save", "prod"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	store, err := murli.LoadProfileStore("myapp")
+	if err != nil {
+		t.Fatalf("LoadProfileStore: %v", err)
+	}
+	p, ok := store.Get("prod")
+	if !ok {
+		t.Fatal("profile prod not found")
+	}
+	if p.Flags["region"] != "us-east-1" {
+		t.Errorf("expected region=us-east-1, got %q", p.Flags["region"])
+	}
+	if p.Flags["token"] != "abc" {
+		t.Errorf("expected token=abc, got %q", p.Flags["token"])
+	}
+}
+
+func TestV2ProfileApplicationAppliesDefaultProfile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	store := &murli.ProfileStore{
+		Default: "staging",
+		Profiles: map[string]murli.Profile{
+			"staging": {Flags: map[string]string{"region": "eu-west-1"}},
+		},
+	}
+	_ = store.Save("myapp")
+
+	var capturedRegion string
+	outBuf := &bytes.Buffer{}
+	app := &cli.App{
+		Name:   "myapp",
+		Writer: outBuf,
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "region", Usage: "Cloud region"},
+		},
+		Commands: []*cli.Command{
+			{
+				Name: "list",
+				Action: func(ctx *cli.Context) error {
+					capturedRegion = ctx.String("region")
+					return nil
+				},
+			},
+		},
+	}
+	murliCLI.AnnotateApp(app, murli.Metadata{
+		FlagAnnotations: map[string]murli.FlagAnnotation{"region": {Profileable: true}},
+	})
+	murliCLI.Wrap(app)
+
+	if err := app.Run([]string{"myapp", "list"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if capturedRegion != "eu-west-1" {
+		t.Errorf("expected eu-west-1 from default profile, got %q", capturedRegion)
+	}
+}
+
+func TestV2ProfileApplicationExplicitFlagBeatsProfile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	store := &murli.ProfileStore{
+		Default: "staging",
+		Profiles: map[string]murli.Profile{
+			"staging": {Flags: map[string]string{"region": "eu-west-1"}},
+		},
+	}
+	_ = store.Save("myapp")
+
+	var capturedRegion string
+	app := &cli.App{
+		Name:   "myapp",
+		Writer: &bytes.Buffer{},
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "region"},
+		},
+		Commands: []*cli.Command{
+			{Name: "list", Action: func(ctx *cli.Context) error {
+				capturedRegion = ctx.String("region")
+				return nil
+			}},
+		},
+	}
+	murliCLI.AnnotateApp(app, murli.Metadata{
+		FlagAnnotations: map[string]murli.FlagAnnotation{"region": {Profileable: true}},
+	})
+	murliCLI.Wrap(app)
+
+	_ = app.Run([]string{"myapp", "--region", "ap-southeast-1", "list"})
+	if capturedRegion != "ap-southeast-1" {
+		t.Errorf("expected ap-southeast-1 (explicit beats profile), got %q", capturedRegion)
+	}
+}
+
+func TestV2DescribeIncludesProfilesInfo(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	store := &murli.ProfileStore{
+		Default:  "prod",
+		Profiles: map[string]murli.Profile{"prod": {Flags: map[string]string{"region": "us-east-1"}}},
+	}
+	_ = store.Save("myapp")
+
+	outBuf := &bytes.Buffer{}
+	app := &cli.App{
+		Name:   "myapp",
+		Writer: outBuf,
+		Flags:  []cli.Flag{&cli.StringFlag{Name: "region"}},
+	}
+	murliCLI.AnnotateApp(app, murli.Metadata{
+		FlagAnnotations: map[string]murli.FlagAnnotation{"region": {Profileable: true}},
+	})
+	murliCLI.Wrap(app)
+
+	if err := app.Run([]string{"myapp", "describe"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var out murli.DescribeOutput
+	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v\nraw: %s", err, outBuf.String())
+	}
+	if !out.Capabilities.Profiles {
+		t.Error("capabilities.profiles should be true")
+	}
+	if out.Profiles == nil {
+		t.Fatal("profiles field should be present")
+	}
+	if len(out.Profiles.ProfileableFlags) == 0 || out.Profiles.ProfileableFlags[0] != "region" {
+		t.Errorf("profileable_flags should contain region, got %v", out.Profiles.ProfileableFlags)
+	}
+	if out.Profiles.Default != "prod" {
+		t.Errorf("expected default=prod, got %q", out.Profiles.Default)
+	}
+}
