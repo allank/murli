@@ -169,7 +169,9 @@ func wrapCommands(cmds []*cli.Command, app *cli.App) {
 		currentCmd := cmd
 
 		cmd.Action = func(ctx *cli.Context) error {
-			applyV2Profile(ctx) // apply stored profile values before anything else
+			if stopped := applyV2Profile(ctx); stopped {
+				return nil // not_found error already written
+			}
 
 			if ctx.Bool("schema") {
 				out := writerOrDefault(ctx.App.Writer, os.Stdout)
@@ -308,9 +310,9 @@ func appWriter(app *cli.App) *murli.Writer {
 }
 
 // applyV2Profile reads the active profile and applies stored flag values to root
-// context flags that were not explicitly set. If --profile was explicitly set but
-// the profile does not exist, a not_found error is written.
-func applyV2Profile(ctx *cli.Context) {
+// context flags that were not explicitly set.
+// Returns true if execution should stop (not_found error written for explicit missing profile).
+func applyV2Profile(ctx *cli.Context) (stopped bool) {
 	// Find the app-level root context: the last context in the lineage that has
 	// a non-nil App. urfave/cli v2 appends a phantom parentContext with no App
 	// as the final element, so we must skip it.
@@ -323,11 +325,11 @@ func applyV2Profile(ctx *cli.Context) {
 		}
 	}
 	if rootCtx == nil {
-		return
+		return false
 	}
 	store, err := murli.LoadProfileStore(ctx.App.Name)
 	if err != nil {
-		return
+		return false
 	}
 	explicitProfile := rootCtx.String("profile")
 	profileName := explicitProfile
@@ -335,7 +337,7 @@ func applyV2Profile(ctx *cli.Context) {
 		profileName = store.Default
 	}
 	if profileName == "" {
-		return
+		return false
 	}
 	profile, ok := store.Get(profileName)
 	if !ok {
@@ -348,14 +350,16 @@ func applyV2Profile(ctx *cli.Context) {
 				Suggestion:  "Run 'profile list' to see available profiles.",
 				Recoverable: false,
 			})
+			return true
 		}
-		return
+		return false
 	}
 	for flagName, value := range profile.Flags {
 		if !rootCtx.IsSet(flagName) {
 			_ = rootCtx.Set(flagName, value)
 		}
 	}
+	return false
 }
 
 // v2FlagStringValue returns the string representation of a named app flag's current value.

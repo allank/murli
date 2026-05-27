@@ -154,7 +154,7 @@ type Conventions struct {
 type ProfilesInfo struct {
 	Available        []string `json:"available,omitempty"`
 	Default          string   `json:"default,omitempty"`
-	ProfileableFlags []string `json:"profileable_flags,omitempty"`
+	ProfileableFlags []string `json:"profileable_flags"` // always present; empty array when no flags are profileable
 }
 
 // DefaultCapabilities returns the Capabilities block reflecting the current murli build.

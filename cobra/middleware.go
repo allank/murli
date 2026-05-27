@@ -177,7 +177,9 @@ func wrapCommands(cmd *gocobra.Command) {
 	}
 
 	cmd.RunE = func(c *gocobra.Command, args []string) error {
-		applyCobraProfile(c) // apply stored profile values before anything else
+		if stopped := applyCobraProfile(c); stopped {
+			return nil // not_found error already written
+		}
 
 		if ok, _ := c.Flags().GetBool("schema"); ok {
 			return EmitSchema(c)
@@ -326,13 +328,14 @@ func cobraMetadata(cmd *gocobra.Command) murli.Metadata {
 
 // applyCobraProfile reads the active profile (from --profile flag or store default)
 // and applies stored flag values to root persistent flags that were not explicitly set.
-// If --profile was explicitly passed and the profile does not exist, a not_found error
-// is written and execution stops (the command action is not reached).
-func applyCobraProfile(c *gocobra.Command) {
+// applyCobraProfile reads the active profile (from --profile flag or store default)
+// and applies stored flag values to root persistent flags that were not explicitly set.
+// Returns true if execution should stop (not_found error written for explicit missing profile).
+func applyCobraProfile(c *gocobra.Command) (stopped bool) {
 	root := c.Root()
 	store, err := murli.LoadProfileStore(root.Name())
 	if err != nil {
-		return // silent — disk errors must not break normal operation
+		return false // silent — disk errors must not break normal operation
 	}
 	explicitProfile, _ := root.PersistentFlags().GetString("profile")
 	profileName := explicitProfile
@@ -340,7 +343,7 @@ func applyCobraProfile(c *gocobra.Command) {
 		profileName = store.Default
 	}
 	if profileName == "" {
-		return
+		return false
 	}
 	profile, ok := store.Get(profileName)
 	if !ok {
@@ -354,8 +357,9 @@ func applyCobraProfile(c *gocobra.Command) {
 				Suggestion:  "Run 'profile list' to see available profiles.",
 				Recoverable: false,
 			})
+			return true
 		}
-		return
+		return false
 	}
 	for flagName, value := range profile.Flags {
 		f := root.PersistentFlags().Lookup(flagName)
@@ -363,6 +367,7 @@ func applyCobraProfile(c *gocobra.Command) {
 			_ = f.Value.Set(value)
 		}
 	}
+	return false
 }
 
 // collectCobraProfileableFlags returns the set of root persistent flag names

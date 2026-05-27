@@ -857,3 +857,34 @@ func TestV2DescribeIncludesProfilesInfo(t *testing.T) {
 		t.Errorf("expected default=prod, got %q", out.Profiles.Default)
 	}
 }
+
+func TestV2ProfileExplicitMissingProfileStopsExecution(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	origExit := murli.ExitFunc
+	var capturedExit int
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = origExit }()
+
+	actionCalled := false
+	app := &cli.App{
+		Name:   "myapp",
+		Writer: &bytes.Buffer{},
+		Commands: []*cli.Command{
+			{Name: "list", Action: func(ctx *cli.Context) error {
+				actionCalled = true
+				return nil
+			}},
+		},
+	}
+	murliCLI.Wrap(app)
+
+	_ = app.Run([]string{"myapp", "--profile", "ghost", "list"})
+
+	if capturedExit != murli.ExitNotFound {
+		t.Errorf("expected ExitNotFound, got %d", capturedExit)
+	}
+	if actionCalled {
+		t.Error("command action must not run when --profile names a missing profile")
+	}
+}

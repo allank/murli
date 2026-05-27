@@ -1101,3 +1101,37 @@ func TestCobraDescribeIncludesProfilesInfo(t *testing.T) {
 		t.Errorf("default should be prod, got %q", out.Profiles.Default)
 	}
 }
+
+func TestCobraProfileExplicitMissingProfileStopsExecution(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	origExit := murli.ExitFunc
+	var capturedExit int
+	murli.ExitFunc = func(code int) { capturedExit = code }
+	defer func() { murli.ExitFunc = origExit }()
+
+	actionCalled := false
+	root := &cobra.Command{Use: "myapp", Short: "test"}
+	listCmd := &cobra.Command{
+		Use: "list",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			actionCalled = true
+			return nil
+		},
+	}
+	root.AddCommand(listCmd)
+	murliCobra.Enable(root)
+
+	errBuf := &bytes.Buffer{}
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(errBuf)
+	root.SetArgs([]string{"--profile", "ghost", "list"})
+	_ = root.Execute()
+
+	if capturedExit != murli.ExitNotFound {
+		t.Errorf("expected ExitNotFound, got %d", capturedExit)
+	}
+	if actionCalled {
+		t.Error("command action must not run when --profile names a missing profile")
+	}
+}
