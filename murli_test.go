@@ -1238,3 +1238,45 @@ func TestWritePlanOutputFormatJSON(t *testing.T) {
 		t.Error("OutputFormatJSON WritePlan should produce pretty-printed (multi-line) JSON")
 	}
 }
+
+func TestFlagAnnotationProfileableMarshal(t *testing.T) {
+	ann := FlagAnnotation{Profileable: true, Env: "MY_REGION"}
+	data, err := json.Marshal(ann)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out FlagAnnotation
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !out.Profileable {
+		t.Error("Profileable should be true after round-trip")
+	}
+	if out.Env != "MY_REGION" {
+		t.Errorf("Env should be MY_REGION, got %q", out.Env)
+	}
+}
+
+func TestApplyFlagAnnotationPropagatesProfileable(t *testing.T) {
+	fs := FlagSchema{Name: "region", Type: "string"}
+	ApplyFlagAnnotation(&fs, FlagAnnotation{Profileable: true})
+	if !fs.Profileable {
+		t.Error("Profileable should be propagated by ApplyFlagAnnotation")
+	}
+}
+
+func TestApplyFlagAnnotationDoesNotSetProfileableWhenFalse(t *testing.T) {
+	fs := FlagSchema{Name: "region", Type: "string", Profileable: true}
+	ApplyFlagAnnotation(&fs, FlagAnnotation{Profileable: false})
+	// false annotation should not clear an already-set true (one-way: can only be set to true, not cleared)
+	if !fs.Profileable {
+		t.Error("Profileable should not be cleared by a false annotation")
+	}
+}
+
+func TestProfilesInfoInDescribeOutputCapabilities(t *testing.T) {
+	caps := DefaultCapabilities()
+	if !caps.Profiles {
+		t.Error("DefaultCapabilities().Profiles should be true")
+	}
+}

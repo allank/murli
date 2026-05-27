@@ -42,6 +42,7 @@ type FlagSchema struct {
 	MutuallyExclusiveWith []string `json:"mutually_exclusive_with,omitempty"`
 	Enum                  []string `json:"enum,omitempty"`
 	Pattern               string   `json:"pattern,omitempty"`
+	Profileable           bool     `json:"profileable,omitempty"`
 }
 
 // SubcommandSchema represents a registered subcommand in --schema output (brief listing).
@@ -67,6 +68,7 @@ type FlagAnnotation struct {
 	MutuallyExclusiveWith []string `json:"mutually_exclusive_with,omitempty"`
 	Enum                  []string `json:"enum,omitempty"`
 	Pattern               string   `json:"pattern,omitempty"`
+	Profileable           bool     `json:"profileable,omitempty"`
 }
 
 // ApplyFlagAnnotation merges a FlagAnnotation onto a FlagSchema in place.
@@ -92,6 +94,9 @@ func ApplyFlagAnnotation(fs *FlagSchema, ann FlagAnnotation) {
 	}
 	if ann.Pattern != "" {
 		fs.Pattern = ann.Pattern
+	}
+	if ann.Profileable {
+		fs.Profileable = true
 	}
 }
 
@@ -124,6 +129,7 @@ type DescribeOutput struct {
 	ToolVersion   string                  `json:"tool_version,omitempty"`
 	Capabilities  Capabilities            `json:"capabilities"`
 	Conventions   *Conventions            `json:"conventions,omitempty"`
+	Profiles      *ProfilesInfo           `json:"profiles,omitempty"`
 	Commands      []DescribeCommandSchema  `json:"commands,omitempty"`
 }
 
@@ -135,11 +141,20 @@ type Capabilities struct {
 	SchemaVersion   string   `json:"schema_version"`
 	ToolVersion     string   `json:"tool_version,omitempty"`
 	ProtocolVersion string   `json:"protocol_version,omitempty"`
+	Profiles        bool     `json:"profiles"`
 }
 
 // Conventions carries the recommended CLI vocabulary; included in describe output.
 type Conventions struct {
 	Vocabulary map[string]string `json:"vocabulary,omitempty"`
+}
+
+// ProfilesInfo describes the profile system state for agent consumption.
+// Included in DescribeOutput when the tool supports profiles.
+type ProfilesInfo struct {
+	Available        []string `json:"available,omitempty"`
+	Default          string   `json:"default,omitempty"`
+	ProfileableFlags []string `json:"profileable_flags,omitempty"`
 }
 
 // DefaultCapabilities returns the Capabilities block reflecting the current murli build.
@@ -150,5 +165,6 @@ func DefaultCapabilities() Capabilities {
 		OutputFormats: []string{"json", "ndjson", "yaml", "text"},
 		SchemaVersion: SchemaVersion,
 		ToolVersion:   ToolVersion,
+		Profiles:      true,
 	}
 }
