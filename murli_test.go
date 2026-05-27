@@ -1203,3 +1203,38 @@ func TestAgentModeForceFieldNotSetFromAgentMode(t *testing.T) {
 		t.Error("agentMode=true must not set IsForced — use WithForce for that")
 	}
 }
+
+func TestWritePlanProtocol01OmitsSchemaVersion(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := NewWriter(buf, &bytes.Buffer{}, false, WithProtocolVersion("0.1"))
+	w.WritePlan("plan", map[string]any{"x": 1})
+
+	var env map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("not JSON: %v\nraw: %s", err, buf.String())
+	}
+	if env["status"] != "plan" {
+		t.Errorf("status: want %q, got %v", "plan", env["status"])
+	}
+	if _, present := env["schema_version"]; present {
+		t.Errorf("schema_version must be absent in protocol 0.1 plan envelope")
+	}
+}
+
+func TestWritePlanOutputFormatJSON(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := NewWriter(buf, &bytes.Buffer{}, false, WithOutputFormat(OutputFormatJSON))
+	w.WritePlan("Would delete 3 files", map[string]any{"count": 3})
+
+	var env map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("not JSON: %v\nraw: %s", err, buf.String())
+	}
+	if env["status"] != "plan" {
+		t.Errorf("status: want %q, got %v", "plan", env["status"])
+	}
+	// OutputFormatJSON must produce pretty-printed (multi-line) output
+	if !strings.Contains(buf.String(), "\n") {
+		t.Error("OutputFormatJSON WritePlan should produce pretty-printed (multi-line) JSON")
+	}
+}
