@@ -28,7 +28,7 @@ type CommandSchema struct {
 
 // FlagSchema represents a single CLI flag in the JSON schema.
 // Basic fields (Name, Type, Default, Description) are auto-populated by the adapter.
-// Extended fields (Env, Sensitive, Persistent, MutuallyExclusiveWith, Enum, Pattern)
+// Extended fields (Env, Sensitive, Persistent, MutuallyExclusiveWith, Enum, Pattern, Profileable)
 // are populated from Metadata.FlagAnnotations[flagName] by the adapter schema emitters
 // (see cobra/schema.go, cli/v2/schema.go, cli/v3/schema.go).
 type FlagSchema struct {
@@ -72,7 +72,7 @@ type FlagAnnotation struct {
 }
 
 // ApplyFlagAnnotation merges a FlagAnnotation onto a FlagSchema in place.
-// Boolean fields (Sensitive, Persistent) are one-way: they can be set to true
+// Boolean fields (Sensitive, Persistent, Profileable) are one-way: they can be set to true
 // but not cleared to false. This is intentional — ApplyFlagAnnotation is applied
 // to a zero-value FlagSchema, so false is the default and only needs to be set once.
 // Slice fields (MutuallyExclusiveWith, Enum) are deep-copied to prevent aliasing.

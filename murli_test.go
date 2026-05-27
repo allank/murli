@@ -1274,7 +1274,7 @@ func TestApplyFlagAnnotationDoesNotSetProfileableWhenFalse(t *testing.T) {
 	}
 }
 
-func TestProfilesInfoInDescribeOutputCapabilities(t *testing.T) {
+func TestDefaultCapabilitiesProfilesTrue(t *testing.T) {
 	caps := DefaultCapabilities()
 	if !caps.Profiles {
 		t.Error("DefaultCapabilities().Profiles should be true")
