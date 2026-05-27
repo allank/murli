@@ -72,8 +72,8 @@ func Wrap(app *cli.App) {
 		Name:  "describe",
 		Usage: "Print the full command tree and capabilities as a single JSON document",
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "output", Usage: "Output format: json|ndjson|yaml|text"},
-			&cli.StringFlag{Name: "protocol-version", Usage: "Protocol version (0.1|0.2)"},
+			&cli.StringFlag{Name: "output", Usage: "Output format: json|ndjson|text"},
+			&cli.StringFlag{Name: "protocol-version", Usage: "Protocol version (0.2)"},
 		},
 		Action: func(ctx *cli.Context) error {
 			stdout := writerOrDefault(ctx.App.Writer, os.Stdout)
@@ -99,7 +99,6 @@ func Wrap(app *cli.App) {
 				SchemaVersion: murli.SchemaVersion,
 				ToolVersion:   murli.ToolVersion,
 				Capabilities:  murli.DefaultCapabilities(),
-				Conventions:   murli.ConventionalVocabulary(),
 				Profiles:      profilesInfo,
 			}
 			for _, cmd := range app.Commands {
@@ -146,8 +145,8 @@ func wrapCommands(cmds []*cli.Command, app *cli.App) {
 		cmd.Flags = append(cmd.Flags,
 			&cli.BoolFlag{Name: "schema", Usage: "Output agent-optimized JSON schema"},
 			&cli.BoolFlag{Name: "agent", Usage: "Force agent-optimized JSON mode"},
-			&cli.StringFlag{Name: "output", Usage: "Output format: json|ndjson|yaml|text"},
-			&cli.StringFlag{Name: "protocol-version", Usage: "Protocol version for envelope shaping (0.1|0.2)"},
+			&cli.StringFlag{Name: "output", Usage: "Output format: json|ndjson|text"},
+			&cli.StringFlag{Name: "protocol-version", Usage: "Protocol version (0.2)"},
 		)
 
 		// Register --force and --yes on mutating commands.
@@ -194,7 +193,7 @@ func wrapCommands(cmds []*cli.Command, app *cli.App) {
 						Code:        murli.ExitUserError,
 						ErrorType:   "invalid_protocol_version",
 						Message:     fmt.Sprintf("unknown --protocol-version %q", pv),
-						Suggestion:  "Use --protocol-version 0.1 or --protocol-version 0.2",
+						Suggestion:  "Use --protocol-version 0.2",
 						Recoverable: true,
 						ValidValues: murli.ValidProtocolVersions,
 					})
@@ -216,7 +215,7 @@ func wrapCommands(cmds []*cli.Command, app *cli.App) {
 						Code:        murli.ExitUserError,
 						ErrorType:   "invalid_output_format",
 						Message:     fmt.Sprintf("unknown --output value %q", outFmt),
-						Suggestion:  "Use --output json, ndjson, yaml, or text",
+						Suggestion:  "Use --output json, ndjson, or text",
 						Recoverable: true,
 						ValidValues: murli.ValidOutputFormats,
 					})

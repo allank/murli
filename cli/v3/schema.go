@@ -28,7 +28,6 @@ func EmitSchema(cmd *cli.Command, w io.Writer) error {
 			ReadOnly:    !meta.Mutating,
 			Idempotent:  meta.Idempotent,
 			Destructive: meta.Destructive,
-			Reversible:  meta.Reversible,
 			DryRunnable: meta.DryRunnable,
 		},
 	}
@@ -149,7 +148,6 @@ func BuildV3DescribeTree(cmd *cli.Command) murli.DescribeCommandSchema {
 			ReadOnly:    !meta.Mutating,
 			Idempotent:  meta.Idempotent,
 			Destructive: meta.Destructive,
-			Reversible:  meta.Reversible,
 			DryRunnable: meta.DryRunnable,
 		},
 	}

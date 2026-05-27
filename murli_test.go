@@ -651,7 +651,7 @@ func TestDescribeOutputTypes(t *testing.T) {
 		Capabilities: Capabilities{
 			Streaming:     true,
 			DryRun:        false,
-			OutputFormats: []string{"json", "ndjson", "yaml", "text"},
+			OutputFormats: []string{"json", "ndjson", "text"},
 			SchemaVersion: "0.2",
 		},
 	}
@@ -672,7 +672,7 @@ func TestDescribeOutputTypes(t *testing.T) {
 		t.Errorf("streaming: %v", caps["streaming"])
 	}
 	formats, ok := caps["output_formats"].([]any)
-	if !ok || len(formats) != 4 {
+	if !ok || len(formats) != 3 {
 		t.Errorf("output_formats: %v", caps["output_formats"])
 	}
 }
@@ -685,7 +685,7 @@ func TestDefaultCapabilities(t *testing.T) {
 	if caps.DryRun {
 		t.Error("DryRun should be false")
 	}
-	if len(caps.OutputFormats) != 4 {
+	if len(caps.OutputFormats) != 3 {
 		t.Errorf("OutputFormats: %v", caps.OutputFormats)
 	}
 	if caps.SchemaVersion != SchemaVersion {
@@ -828,39 +828,6 @@ func TestOutputFormatNDJSON(t *testing.T) {
 	}
 }
 
-func TestOutputFormatYAML(t *testing.T) {
-	buf := &bytes.Buffer{}
-	w := NewWriter(buf, &bytes.Buffer{}, false, WithOutputFormat(OutputFormatYAML))
-	w.WriteSuccess("done", map[string]any{"x": 1})
-
-	got := buf.String()
-	if !strings.Contains(got, "status: ok") {
-		t.Errorf("expected YAML with 'status: ok', got: %q", got)
-	}
-}
-
-func TestProtocolVersion01OmitsVersionFields(t *testing.T) {
-	stderr := &bytes.Buffer{}
-	var capturedCode int
-	origExit := ExitFunc
-	ExitFunc = func(code int) { capturedCode = code }
-	defer func() { ExitFunc = origExit }()
-
-	w := NewWriter(&bytes.Buffer{}, stderr, false, WithProtocolVersion("0.1"))
-	w.WriteError(&AgentError{Code: ExitUserError, ErrorType: "test", Message: "oops", Recoverable: true})
-
-	var env map[string]any
-	if err := json.Unmarshal(stderr.Bytes(), &env); err != nil {
-		t.Fatalf("unmarshal: %v\nraw: %s", err, stderr.String())
-	}
-	if _, present := env["schema_version"]; present {
-		t.Errorf("schema_version must be absent in protocol 0.1, got: %v", env["schema_version"])
-	}
-	if _, present := env["tool_version"]; present {
-		t.Errorf("tool_version must be absent in protocol 0.1")
-	}
-	_ = capturedCode
-}
 
 func TestProtocolVersion02IncludesSchemaVersion(t *testing.T) {
 	stderr := &bytes.Buffer{}
@@ -889,19 +856,6 @@ func TestProtocolVersionDefaultIs02(t *testing.T) {
 	}
 }
 
-func TestSuccessEnvelopeWithProtocol01(t *testing.T) {
-	buf := &bytes.Buffer{}
-	w := NewWriter(buf, &bytes.Buffer{}, false, WithProtocolVersion("0.1"))
-	w.WriteSuccess("done", map[string]any{"x": 1})
-
-	var env map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
-		t.Fatalf("not JSON: %v\nraw: %s", err, buf.String())
-	}
-	if _, present := env["schema_version"]; present {
-		t.Errorf("schema_version must be absent in protocol 0.1 success envelope")
-	}
-}
 
 func TestCheckConventions_NoViolations(t *testing.T) {
 	var buf bytes.Buffer
@@ -935,18 +889,9 @@ func TestCheckConventions_FlagViolation(t *testing.T) {
 	}
 }
 
-func TestCheckConventions_ConventionalVocabulary(t *testing.T) {
-	voc := ConventionalVocabulary()
-	if voc == nil || voc.Vocabulary == nil {
-		t.Errorf("expected non-nil vocabulary in ConventionalVocabulary()")
-	}
-	if _, ok := voc.Vocabulary["get"]; !ok {
-		t.Errorf("expected 'get' in conventional vocabulary")
-	}
-}
 
 func TestSafetyBlockMarshal(t *testing.T) {
-	t.Run("read-only command omits destructive/reversible/dry_run", func(t *testing.T) {
+	t.Run("read-only command omits destructive/dry_run", func(t *testing.T) {
 		sb := SafetyBlock{ReadOnly: true, Idempotent: true}
 		data, err := json.Marshal(sb)
 		if err != nil {
@@ -963,9 +908,6 @@ func TestSafetyBlockMarshal(t *testing.T) {
 		if _, present := got["destructive"]; present {
 			t.Error("destructive must be omitted when false")
 		}
-		if _, present := got["reversible"]; present {
-			t.Error("reversible must be omitted when false")
-		}
 		if _, present := got["dry_run_supported"]; present {
 			t.Error("dry_run_supported must be omitted when false")
 		}
@@ -976,7 +918,6 @@ func TestSafetyBlockMarshal(t *testing.T) {
 			ReadOnly:    false,
 			Idempotent:  false,
 			Destructive: true,
-			Reversible:  false,
 			DryRunnable: true,
 		}
 		data, err := json.Marshal(sb)
@@ -990,9 +931,6 @@ func TestSafetyBlockMarshal(t *testing.T) {
 		}
 		if got["destructive"] != true {
 			t.Errorf("destructive: %v", got["destructive"])
-		}
-		if _, present := got["reversible"]; present {
-			t.Error("reversible must be omitted when false")
 		}
 		if got["dry_run_supported"] != true {
 			t.Errorf("dry_run_supported: %v", got["dry_run_supported"])
@@ -1060,7 +998,6 @@ func TestMetadataDryRunnableField(t *testing.T) {
 		Mutating:    true,
 		Destructive: true,
 		DryRunnable: true,
-		Reversible:  false,
 	}
 	data, err := json.Marshal(m)
 	if err != nil {
@@ -1073,9 +1010,6 @@ func TestMetadataDryRunnableField(t *testing.T) {
 	}
 	if got["destructive"] != true {
 		t.Errorf("destructive: %v", got["destructive"])
-	}
-	if _, present := got["reversible"]; present {
-		t.Error("reversible must be omitted when false")
 	}
 }
 
@@ -1166,17 +1100,6 @@ func TestWritePlanNDJSON(t *testing.T) {
 	}
 }
 
-func TestWritePlanYAML(t *testing.T) {
-	buf := &bytes.Buffer{}
-	w := NewWriter(buf, &bytes.Buffer{}, false, WithOutputFormat(OutputFormatYAML))
-
-	w.WritePlan("Would delete 3 files", map[string]any{"count": 3})
-
-	got := buf.String()
-	if !strings.Contains(got, "status: plan") {
-		t.Errorf("YAML WritePlan: expected 'status: plan', got: %q", got)
-	}
-}
 
 func TestWritePlanOmitsToolVersionWhenUnset(t *testing.T) {
 	orig := ToolVersion
@@ -1204,22 +1127,6 @@ func TestAgentModeForceFieldNotSetFromAgentMode(t *testing.T) {
 	}
 }
 
-func TestWritePlanProtocol01OmitsSchemaVersion(t *testing.T) {
-	buf := &bytes.Buffer{}
-	w := NewWriter(buf, &bytes.Buffer{}, false, WithProtocolVersion("0.1"))
-	w.WritePlan("plan", map[string]any{"x": 1})
-
-	var env map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
-		t.Fatalf("not JSON: %v\nraw: %s", err, buf.String())
-	}
-	if env["status"] != "plan" {
-		t.Errorf("status: want %q, got %v", "plan", env["status"])
-	}
-	if _, present := env["schema_version"]; present {
-		t.Errorf("schema_version must be absent in protocol 0.1 plan envelope")
-	}
-}
 
 func TestWritePlanOutputFormatJSON(t *testing.T) {
 	buf := &bytes.Buffer{}

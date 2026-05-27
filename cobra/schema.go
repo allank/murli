@@ -35,7 +35,6 @@ func EmitSchema(cmd *gocobra.Command) error {
 			ReadOnly:    !meta.Mutating,
 			Idempotent:  meta.Idempotent,
 			Destructive: meta.Destructive,
-			Reversible:  meta.Reversible,
 			DryRunnable: meta.DryRunnable,
 		},
 	}
@@ -156,7 +155,6 @@ func BuildDescribeTree(cmd *gocobra.Command) murli.DescribeCommandSchema {
 			ReadOnly:    !meta.Mutating,
 			Idempotent:  meta.Idempotent,
 			Destructive: meta.Destructive,
-			Reversible:  meta.Reversible,
 			DryRunnable: meta.DryRunnable,
 		},
 	}

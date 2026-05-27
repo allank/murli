@@ -6,7 +6,6 @@ type SafetyBlock struct {
 	ReadOnly    bool `json:"read_only"`
 	Idempotent  bool `json:"idempotent"`
 	Destructive bool `json:"destructive,omitempty"`
-	Reversible  bool `json:"reversible,omitempty"`
 	DryRunnable bool `json:"dry_run_supported,omitempty"`
 }
 
@@ -128,7 +127,6 @@ type DescribeOutput struct {
 	SchemaVersion string                  `json:"schema_version"`
 	ToolVersion   string                  `json:"tool_version,omitempty"`
 	Capabilities  Capabilities            `json:"capabilities"`
-	Conventions   *Conventions            `json:"conventions,omitempty"`
 	Profiles      *ProfilesInfo           `json:"profiles,omitempty"`
 	Commands      []DescribeCommandSchema  `json:"commands,omitempty"`
 }
@@ -144,11 +142,6 @@ type Capabilities struct {
 	Profiles        bool     `json:"profiles"`
 }
 
-// Conventions carries the recommended CLI vocabulary; included in describe output.
-type Conventions struct {
-	Vocabulary map[string]string `json:"vocabulary,omitempty"`
-}
-
 // ProfilesInfo describes the profile system state for agent consumption.
 // Included in DescribeOutput when the tool supports profiles.
 type ProfilesInfo struct {
@@ -162,7 +155,7 @@ func DefaultCapabilities() Capabilities {
 	return Capabilities{
 		Streaming:     true,
 		DryRun:        false,
-		OutputFormats: []string{"json", "ndjson", "yaml", "text"},
+		OutputFormats: []string{"json", "ndjson", "text"},
 		SchemaVersion: SchemaVersion,
 		ToolVersion:   ToolVersion,
 		Profiles:      true,

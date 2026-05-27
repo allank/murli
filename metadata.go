@@ -42,9 +42,6 @@ type Metadata struct {
 	// (e.g. delete, overwrite, truncate).
 	Destructive bool `json:"destructive,omitempty"`
 
-	// Reversible marks commands that can be undone if something goes wrong
-	// (e.g. the command creates a backup before modifying).
-	Reversible bool `json:"reversible,omitempty"`
 }
 
 // ArgumentMetadata documents a single positional argument.

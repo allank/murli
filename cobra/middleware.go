@@ -41,10 +41,10 @@ func Enable(rootCmd *gocobra.Command) {
 		rootCmd.PersistentFlags().Bool("agent", false, "Force agent-optimized JSON mode")
 	}
 	if rootCmd.PersistentFlags().Lookup("output") == nil {
-		rootCmd.PersistentFlags().String("output", "", "Output format: json|ndjson|yaml|text")
+		rootCmd.PersistentFlags().String("output", "", "Output format: json|ndjson|text")
 	}
 	if rootCmd.PersistentFlags().Lookup("protocol-version") == nil {
-		rootCmd.PersistentFlags().String("protocol-version", "", "Protocol version for envelope shaping (0.1|0.2)")
+		rootCmd.PersistentFlags().String("protocol-version", "", "Protocol version (0.2)")
 	}
 	if rootCmd.PersistentFlags().Lookup("profile") == nil {
 		rootCmd.PersistentFlags().String("profile", "", "Profile name to use for this invocation")
@@ -103,7 +103,6 @@ func Enable(rootCmd *gocobra.Command) {
 				SchemaVersion: murli.SchemaVersion,
 				ToolVersion:   murli.ToolVersion,
 				Capabilities:  murli.DefaultCapabilities(),
-				Conventions:   murli.ConventionalVocabulary(),
 				Profiles:      profilesInfo,
 			}
 			for _, child := range rootCmd.Commands() {
@@ -201,7 +200,7 @@ func wrapCommands(cmd *gocobra.Command) {
 					Code:        murli.ExitUserError,
 					ErrorType:   "invalid_protocol_version",
 					Message:     fmt.Sprintf("unknown --protocol-version %q", pv),
-					Suggestion:  "Use --protocol-version 0.1 or --protocol-version 0.2",
+					Suggestion:  "Use --protocol-version 0.2",
 					Recoverable: true,
 					ValidValues: murli.ValidProtocolVersions,
 				})
@@ -223,7 +222,7 @@ func wrapCommands(cmd *gocobra.Command) {
 					Code:        murli.ExitUserError,
 					ErrorType:   "invalid_output_format",
 					Message:     fmt.Sprintf("unknown --output value %q", outFmt),
-					Suggestion:  "Use --output json, ndjson, yaml, or text",
+					Suggestion:  "Use --output json, ndjson, or text",
 					Recoverable: true,
 					ValidValues: murli.ValidOutputFormats,
 				})

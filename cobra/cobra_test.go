@@ -241,7 +241,7 @@ func TestDescribeCommand(t *testing.T) {
 	if !out.Capabilities.Streaming {
 		t.Error("capabilities.streaming must be true")
 	}
-	if len(out.Capabilities.OutputFormats) != 4 {
+	if len(out.Capabilities.OutputFormats) != 3 {
 		t.Errorf("output_formats: got %v", out.Capabilities.OutputFormats)
 	}
 	if len(out.Commands) < 2 {
@@ -270,9 +270,7 @@ func TestDescribeCommand(t *testing.T) {
 		t.Error("delete command not found in describe output")
 	}
 
-	if out.Conventions == nil || len(out.Conventions.Vocabulary) == 0 {
-		t.Error("conventions.vocabulary must be present and non-empty")
-	}
+
 }
 
 func TestMiddlewareInterception(t *testing.T) {

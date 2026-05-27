@@ -85,10 +85,8 @@ func (w *Writer) WriteError(err *AgentError) {
 		if len(err.ValidValues) > 0 {
 			toWrite.ValidValues = append([]string(nil), err.ValidValues...)
 		}
-		if w.ProtocolVersion() != "0.1" {
-			toWrite.SchemaVersion = SchemaVersion
-			toWrite.ToolVersion = ToolVersion
-		}
+		toWrite.SchemaVersion = SchemaVersion
+		toWrite.ToolVersion = ToolVersion
 		enc := json.NewEncoder(w.stderr)
 		enc.SetIndent("", "  ")
 		enc.SetEscapeHTML(false)

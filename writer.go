@@ -6,8 +6,6 @@ import (
 	"io"
 	"os"
 	"sync"
-
-	"gopkg.in/yaml.v3"
 )
 
 // OutputFormat controls the serialization format of WriteSuccess.
@@ -20,17 +18,15 @@ const (
 	OutputFormatJSON OutputFormat = "json"
 	// OutputFormatNDJSON writes a minified single-line JSON envelope to stdout.
 	OutputFormatNDJSON OutputFormat = "ndjson"
-	// OutputFormatYAML writes a YAML-encoded envelope to stdout.
-	OutputFormatYAML OutputFormat = "yaml"
 	// OutputFormatText writes human-readable plain text to stdout (same as TTY mode).
 	OutputFormatText OutputFormat = "text"
 )
 
 // ValidOutputFormats lists the accepted --output values.
-var ValidOutputFormats = []string{"json", "ndjson", "yaml", "text"}
+var ValidOutputFormats = []string{"json", "ndjson", "text"}
 
 // ValidProtocolVersions lists the accepted --protocol-version values.
-var ValidProtocolVersions = []string{"0.1", "0.2"}
+var ValidProtocolVersions = []string{"0.2"}
 
 // WriterOption is a functional option for NewWriter.
 type WriterOption func(*Writer)
@@ -97,7 +93,7 @@ func NewWriter(stdout, stderr io.Writer, agentMode bool, opts ...WriterOption) *
 	switch w.outputFormat {
 	case OutputFormatText:
 		w.isTTY = true
-	case OutputFormatJSON, OutputFormatNDJSON, OutputFormatYAML:
+	case OutputFormatJSON, OutputFormatNDJSON:
 		w.isTTY = false
 	}
 	w.logger = NewLogger(stderr, w.isTTY)
@@ -153,7 +149,6 @@ func (w *Writer) Flush() {
 // WriteSuccess writes to stdout. Format depends on outputFormat and isTTY:
 //   - TTY or OutputFormatText: humanText plain line
 //   - OutputFormatNDJSON: single minified JSON line
-//   - OutputFormatYAML: YAML-encoded envelope
 //   - OutputFormatJSON or default agent mode: pretty-printed JSON envelope
 func (w *Writer) WriteSuccess(humanText string, jsonPayload any) {
 	switch {
@@ -168,12 +163,6 @@ func (w *Writer) WriteSuccess(humanText string, jsonPayload any) {
 		}
 		fmt.Fprintf(w.stdout, "%s\n", data)
 
-	case w.outputFormat == OutputFormatYAML:
-		envelope := w.buildSuccessEnvelope(jsonPayload)
-		enc := yaml.NewEncoder(w.stdout)
-		enc.SetIndent(2)
-		_ = enc.Encode(envelope)
-
 	default: // OutputFormatJSON or default agent mode
 		envelope := w.buildSuccessEnvelope(jsonPayload)
 		enc := json.NewEncoder(w.stdout)
@@ -183,18 +172,15 @@ func (w *Writer) WriteSuccess(humanText string, jsonPayload any) {
 	}
 }
 
-// buildSuccessEnvelope constructs the success envelope map,
-// respecting the negotiated protocol version.
+// buildSuccessEnvelope constructs the success envelope map.
 func (w *Writer) buildSuccessEnvelope(jsonPayload any) map[string]any {
 	envelope := map[string]any{
-		"status": "ok",
-		"result": jsonPayload,
+		"status":         "ok",
+		"result":         jsonPayload,
+		"schema_version": SchemaVersion,
 	}
-	if w.ProtocolVersion() != "0.1" {
-		envelope["schema_version"] = SchemaVersion
-		if ToolVersion != "" {
-			envelope["tool_version"] = ToolVersion
-		}
+	if ToolVersion != "" {
+		envelope["tool_version"] = ToolVersion
 	}
 	return envelope
 }
@@ -202,7 +188,6 @@ func (w *Writer) buildSuccessEnvelope(jsonPayload any) map[string]any {
 // WritePlan writes a dry-run plan to stdout. Format depends on outputFormat and isTTY:
 //   - TTY or OutputFormatText: humanText plain line
 //   - OutputFormatNDJSON: single minified JSON line with "status": "plan"
-//   - OutputFormatYAML: YAML-encoded plan envelope
 //   - OutputFormatJSON or default agent mode: pretty-printed JSON with "status": "plan"
 func (w *Writer) WritePlan(humanText string, plan any) {
 	switch {
@@ -217,12 +202,6 @@ func (w *Writer) WritePlan(humanText string, plan any) {
 		}
 		fmt.Fprintf(w.stdout, "%s\n", data)
 
-	case w.outputFormat == OutputFormatYAML:
-		envelope := w.buildPlanEnvelope(plan)
-		enc := yaml.NewEncoder(w.stdout)
-		enc.SetIndent(2)
-		_ = enc.Encode(envelope)
-
 	default: // OutputFormatJSON or default agent mode
 		envelope := w.buildPlanEnvelope(plan)
 		enc := json.NewEncoder(w.stdout)
@@ -232,18 +211,15 @@ func (w *Writer) WritePlan(humanText string, plan any) {
 	}
 }
 
-// buildPlanEnvelope constructs the plan envelope map,
-// respecting the negotiated protocol version.
+// buildPlanEnvelope constructs the plan envelope map.
 func (w *Writer) buildPlanEnvelope(plan any) map[string]any {
 	envelope := map[string]any{
-		"status": "plan",
-		"result": plan,
+		"status":         "plan",
+		"result":         plan,
+		"schema_version": SchemaVersion,
 	}
-	if w.ProtocolVersion() != "0.1" {
-		envelope["schema_version"] = SchemaVersion
-		if ToolVersion != "" {
-			envelope["tool_version"] = ToolVersion
-		}
+	if ToolVersion != "" {
+		envelope["tool_version"] = ToolVersion
 	}
 	return envelope
 }

@@ -55,20 +55,3 @@ func CheckConventions(commandNames, flagNames []string, w io.Writer) int {
 	return count
 }
 
-// ConventionalVocabulary returns the recommended verb and flag vocabulary as a
-// Conventions value suitable for inclusion in describe output.
-func ConventionalVocabulary() *Conventions {
-	return &Conventions{
-		Vocabulary: map[string]string{
-			"get":       "preferred verb for read operations (over fetch, info, retrieve)",
-			"list":      "preferred verb for enumeration (over show-all, ls, enumerate)",
-			"delete":    "preferred verb for removal (over remove, rm)",
-			"create":    "preferred verb for creation (over add, new, make)",
-			"update":    "preferred verb for modification (over edit, modify, set)",
-			"--force":   "preferred flag for bypassing confirmations (over --skip-confirmations, --no-confirm)",
-			"--quiet":   "preferred flag for suppressing output (over --silent, --no-output)",
-			"--dry-run": "preferred flag for preview mode (over --preview, --what-if)",
-			"--output":  "preferred flag for format selection (over --format, --output-format)",
-		},
-	}
-}
