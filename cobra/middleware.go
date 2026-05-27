@@ -328,8 +328,6 @@ func cobraMetadata(cmd *gocobra.Command) murli.Metadata {
 
 // applyCobraProfile reads the active profile (from --profile flag or store default)
 // and applies stored flag values to root persistent flags that were not explicitly set.
-// applyCobraProfile reads the active profile (from --profile flag or store default)
-// and applies stored flag values to root persistent flags that were not explicitly set.
 // Returns true if execution should stop (not_found error written for explicit missing profile).
 func applyCobraProfile(c *gocobra.Command) (stopped bool) {
 	root := c.Root()
