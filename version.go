@@ -1,8 +1,8 @@
 package murli
 
 // SchemaVersion is the murli envelope schema version.
-// Frozen at "1.0" once v1.0 ships; incrementing requires a documented migration.
-const SchemaVersion = "0.2"
+// Frozen at "1.0"; incrementing requires a documented migration.
+const SchemaVersion = "1.0"
 
 // ToolVersion is the version of the CLI tool using murli.
 // Set this in your main() using a version variable injected at build time:

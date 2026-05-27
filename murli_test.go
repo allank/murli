@@ -643,16 +643,22 @@ func TestReturnSchemaOutputSchemaRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSchemaVersionIs10(t *testing.T) {
+	if SchemaVersion != "1.0" {
+		t.Errorf("SchemaVersion must be frozen at 1.0 for stable contract, got %q", SchemaVersion)
+	}
+}
+
 func TestDescribeOutputTypes(t *testing.T) {
 	out := DescribeOutput{
 		Name:          "riffle",
 		Summary:       "Riffle semantic search",
-		SchemaVersion: "0.2",
+		SchemaVersion: "1.0",
 		Capabilities: Capabilities{
 			Streaming:     true,
 			DryRun:        false,
 			OutputFormats: []string{"json", "ndjson", "text"},
-			SchemaVersion: "0.2",
+			SchemaVersion: "1.0",
 		},
 	}
 	data, err := json.Marshal(out)
