@@ -1,0 +1,12 @@
+{
+  "result": {
+    "count": 3,
+    "files": [
+      "a",
+      "b",
+      "c"
+    ]
+  },
+  "schema_version": "1.0",
+  "status": "plan"
+}

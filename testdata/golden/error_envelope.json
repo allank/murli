@@ -1,0 +1,8 @@
+{
+  "code": 1,
+  "error": "invalid_input",
+  "message": "the --region flag is required",
+  "suggestion": "Pass --region us-east-1",
+  "recoverable": true,
+  "schema_version": "1.0"
+}
