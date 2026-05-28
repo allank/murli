@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/allank/murli"
@@ -886,5 +887,35 @@ func TestV2ProfileExplicitMissingProfileStopsExecution(t *testing.T) {
 	}
 	if actionCalled {
 		t.Error("command action must not run when --profile names a missing profile")
+	}
+}
+
+func TestV2DescribeAgentsMD(t *testing.T) {
+	app := &cli.App{
+		Name:  "riffle",
+		Usage: "Riffle semantic search",
+		Commands: []*cli.Command{
+			{Name: "query", Usage: "Search"},
+		},
+	}
+	var buf bytes.Buffer
+	app.Writer = &buf
+
+	murliCLI.Wrap(app)
+
+	err := app.Run([]string{"riffle", "describe", "--agents-md"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "# AGENTS.md") {
+		t.Errorf("expected # AGENTS.md in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "## Tool: riffle") {
+		t.Errorf("expected ## Tool: riffle in output, got:\n%s", got)
+	}
+	if strings.Contains(got, `"schema_version"`) {
+		t.Error("--agents-md output must not contain JSON")
 	}
 }

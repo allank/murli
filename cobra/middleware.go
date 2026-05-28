@@ -32,6 +32,40 @@ func Execute(rootCmd *gocobra.Command) error {
 	return err
 }
 
+// buildCobraDescribeOutput builds the DescribeOutput for rootCmd.
+// Called by both the describe command and the doctor command.
+func buildCobraDescribeOutput(rootCmd *gocobra.Command) murli.DescribeOutput {
+	store, _ := murli.LoadProfileStore(rootCmd.Name())
+	rootMeta := cobraMetadata(rootCmd)
+	profileableNames := []string{}
+	for flagName, ann := range rootMeta.FlagAnnotations {
+		if ann.Profileable {
+			profileableNames = append(profileableNames, flagName)
+		}
+	}
+	sort.Strings(profileableNames)
+	profilesInfo := &murli.ProfilesInfo{ProfileableFlags: profileableNames}
+	if store != nil && len(store.Names()) > 0 {
+		profilesInfo.Available = store.Names()
+		profilesInfo.Default = store.Default
+	}
+	out := murli.DescribeOutput{
+		Name:          rootCmd.Name(),
+		Summary:       rootCmd.Short,
+		SchemaVersion: murli.SchemaVersion,
+		ToolVersion:   murli.ToolVersion,
+		Capabilities:  murli.DefaultCapabilities(),
+		Profiles:      profilesInfo,
+	}
+	for _, child := range rootCmd.Commands() {
+		if child.Hidden || child.Name() == "help" || child.Name() == "describe" {
+			continue
+		}
+		out.Commands = append(out.Commands, BuildDescribeTree(child))
+	}
+	return out
+}
+
 // Enable injects --schema and --agent persistent flags and wraps all command RunE handlers.
 func Enable(rootCmd *gocobra.Command) {
 	if rootCmd.PersistentFlags().Lookup("schema") == nil {
@@ -77,40 +111,13 @@ func Enable(rootCmd *gocobra.Command) {
 		Use:   "describe",
 		Short: "Print the full command tree and capabilities as a single JSON document",
 		RunE: func(cmd *gocobra.Command, args []string) error {
-			store, _ := murli.LoadProfileStore(rootCmd.Name()) // empty store on error — never fail describe
+			out := buildCobraDescribeOutput(rootCmd)
 
-			// Collect profileable root flag names (always a non-nil slice so it serialises as []).
-			rootMeta := cobraMetadata(rootCmd)
-			profileableNames := []string{}
-			for flagName, ann := range rootMeta.FlagAnnotations {
-				if ann.Profileable {
-					profileableNames = append(profileableNames, flagName)
-				}
-			}
-			sort.Strings(profileableNames)
-
-			profilesInfo := &murli.ProfilesInfo{
-				ProfileableFlags: profileableNames,
-			}
-			if store != nil && len(store.Names()) > 0 {
-				profilesInfo.Available = store.Names()
-				profilesInfo.Default = store.Default
+			if agentsMD, _ := cmd.Flags().GetBool("agents-md"); agentsMD {
+				fmt.Fprint(cmd.OutOrStdout(), murli.FormatAgentsMD(out))
+				return nil
 			}
 
-			out := murli.DescribeOutput{
-				Name:          rootCmd.Name(),
-				Summary:       rootCmd.Short,
-				SchemaVersion: murli.SchemaVersion,
-				ToolVersion:   murli.ToolVersion,
-				Capabilities:  murli.DefaultCapabilities(),
-				Profiles:      profilesInfo,
-			}
-			for _, child := range rootCmd.Commands() {
-				if child.Hidden || child.Name() == "help" || child.Name() == "describe" {
-					continue
-				}
-				out.Commands = append(out.Commands, BuildDescribeTree(child))
-			}
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
 			enc.SetEscapeHTML(false)
@@ -118,6 +125,7 @@ func Enable(rootCmd *gocobra.Command) {
 			return nil
 		},
 	}
+	describeCmd.Flags().Bool("agents-md", false, "Generate an AGENTS.md stub instead of JSON")
 	rootCmd.AddCommand(describeCmd)
 
 	// Auto-mount profile subcommand group if not already present.

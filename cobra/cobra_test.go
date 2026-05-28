@@ -273,6 +273,34 @@ func TestDescribeCommand(t *testing.T) {
 
 }
 
+func TestDescribeAgentsMD(t *testing.T) {
+	root := &cobra.Command{Use: "riffle", Short: "Riffle semantic search"}
+	queryCmd := &cobra.Command{Use: "query <text>", Short: "Semantic query"}
+	root.AddCommand(queryCmd)
+	murliCobra.Enable(root)
+
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	root.SetArgs([]string{"describe", "--agents-md"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "# AGENTS.md") {
+		t.Error("--agents-md output must start with # AGENTS.md")
+	}
+	if !strings.Contains(got, "## Tool: riffle") {
+		t.Error("--agents-md output must contain ## Tool: riffle")
+	}
+	if !strings.Contains(got, "riffle describe") {
+		t.Error("--agents-md output must reference 'riffle describe'")
+	}
+	if strings.Contains(got, `"schema_version"`) {
+		t.Error("--agents-md output must not contain JSON")
+	}
+}
+
 func TestMiddlewareInterception(t *testing.T) {
 	var capturedExit int
 	murli.ExitFunc = func(code int) { capturedExit = code }

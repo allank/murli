@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/allank/murli"
@@ -907,5 +908,35 @@ func TestV3DescribeIncludesProfilesInfo(t *testing.T) {
 	}
 	if out.Profiles.Default != "prod" {
 		t.Errorf("expected default=prod, got %q", out.Profiles.Default)
+	}
+}
+
+func TestV3DescribeAgentsMD(t *testing.T) {
+	app := &cli.Command{
+		Name:  "riffle",
+		Usage: "Riffle semantic search",
+		Commands: []*cli.Command{
+			{Name: "query", Usage: "Search"},
+		},
+	}
+	var buf bytes.Buffer
+	app.Writer = &buf
+
+	murliCLI.Wrap(app)
+
+	err := app.Run(context.Background(), []string{"riffle", "describe", "--agents-md"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "# AGENTS.md") {
+		t.Errorf("expected # AGENTS.md in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "## Tool: riffle") {
+		t.Errorf("expected ## Tool: riffle in output, got:\n%s", got)
+	}
+	if strings.Contains(got, `"schema_version"`) {
+		t.Error("--agents-md output must not contain JSON")
 	}
 }

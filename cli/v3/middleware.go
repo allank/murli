@@ -35,6 +35,40 @@ func Run(app *cli.Command, args []string) error {
 	return nil
 }
 
+// buildV3AppDescribeOutput builds the DescribeOutput for app.
+// Called by both the describe command and the doctor command.
+func buildV3AppDescribeOutput(app *cli.Command) murli.DescribeOutput {
+	appStore, _ := murli.LoadProfileStore(app.Name)
+	rootMeta := metadataFor(app)
+	profileableNames := []string{}
+	for flagName, ann := range rootMeta.FlagAnnotations {
+		if ann.Profileable {
+			profileableNames = append(profileableNames, flagName)
+		}
+	}
+	sort.Strings(profileableNames)
+	profilesInfo := &murli.ProfilesInfo{ProfileableFlags: profileableNames}
+	if appStore != nil && len(appStore.Names()) > 0 {
+		profilesInfo.Available = appStore.Names()
+		profilesInfo.Default = appStore.Default
+	}
+	out := murli.DescribeOutput{
+		Name:          app.Name,
+		Summary:       app.Usage,
+		SchemaVersion: murli.SchemaVersion,
+		ToolVersion:   murli.ToolVersion,
+		Capabilities:  murli.DefaultCapabilities(),
+		Profiles:      profilesInfo,
+	}
+	for _, cmd := range app.Commands {
+		if cmd.Hidden || cmd.Name == "describe" {
+			continue
+		}
+		out.Commands = append(out.Commands, BuildV3DescribeTree(cmd))
+	}
+	return out
+}
+
 // Wrap injects --schema and --agent flags and wraps all command Actions.
 func Wrap(app *cli.Command) {
 	// Guard against double-wrapping on repeated Wrap() calls.
@@ -97,39 +131,17 @@ func Wrap(app *cli.Command) {
 			Flags: []cli.Flag{
 				&cli.StringFlag{Name: "output", Usage: "Output format: json|ndjson|text"},
 				&cli.StringFlag{Name: "protocol-version", Usage: "Protocol version (0.2)"},
+				&cli.BoolFlag{Name: "agents-md", Usage: "Generate an AGENTS.md stub instead of JSON"},
 			},
 			Action: func(ctx context.Context, c *cli.Command) error {
+				out := buildV3AppDescribeOutput(app)
+
 				stdout := writerOrDefault(app.Writer, os.Stdout)
-
-				appStore, _ := murli.LoadProfileStore(app.Name)
-				rootMeta := metadataFor(app)
-				profileableNames := []string{}
-				for flagName, ann := range rootMeta.FlagAnnotations {
-					if ann.Profileable {
-						profileableNames = append(profileableNames, flagName)
-					}
-				}
-				sort.Strings(profileableNames)
-				profilesInfo := &murli.ProfilesInfo{ProfileableFlags: profileableNames}
-				if appStore != nil && len(appStore.Names()) > 0 {
-					profilesInfo.Available = appStore.Names()
-					profilesInfo.Default = appStore.Default
+				if c.Bool("agents-md") {
+					fmt.Fprint(stdout, murli.FormatAgentsMD(out))
+					return nil
 				}
 
-				out := murli.DescribeOutput{
-					Name:          app.Name,
-					Summary:       app.Usage,
-					SchemaVersion: murli.SchemaVersion,
-					ToolVersion:   murli.ToolVersion,
-					Capabilities:  murli.DefaultCapabilities(),
-					Profiles:      profilesInfo,
-				}
-				for _, cmd := range app.Commands {
-					if cmd.Hidden || cmd.Name == "describe" {
-						continue
-					}
-					out.Commands = append(out.Commands, BuildV3DescribeTree(cmd))
-				}
 				enc := json.NewEncoder(stdout)
 				enc.SetIndent("", "  ")
 				enc.SetEscapeHTML(false)
