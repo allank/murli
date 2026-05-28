@@ -1,6 +1,9 @@
 package murli
 
-import "fmt"
+import (
+	"fmt"
+	"io"
+)
 
 // CheckResult is the outcome of one doctor self-check.
 type CheckResult struct {
@@ -61,6 +64,31 @@ func checkOutputFormats(out DescribeOutput) CheckResult {
 		}
 	}
 	return CheckResult{Name: "output_formats", Status: "pass"}
+}
+
+// WriteDoctorTTY writes a human-readable doctor report to w.
+// Used by adapter doctor commands when running in a terminal (TTY) context.
+func WriteDoctorTTY(w io.Writer, report DoctorReport) {
+	for _, c := range report.Checks {
+		var icon string
+		switch c.Status {
+		case "pass":
+			icon = "✓"
+		case "warn":
+			icon = "⚠"
+		case "fail":
+			icon = "✗"
+		default:
+			icon = "?"
+		}
+		if c.Message != "" {
+			fmt.Fprintf(w, "%s %s: %s\n", icon, c.Name, c.Message)
+		} else {
+			fmt.Fprintf(w, "%s %s\n", icon, c.Name)
+		}
+	}
+	fmt.Fprintf(w, "\n%d passed, %d warnings, %d failed\n",
+		report.Passed, report.Warnings, report.Failed)
 }
 
 func checkCommandMetadata(out DescribeOutput) CheckResult {

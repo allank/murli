@@ -146,30 +146,6 @@ mountDoctor:
 	rootCmd.AddCommand(buildCobraDoctorCmd(rootCmd))
 }
 
-// writeDoctorTTY writes a human-readable doctor report to w.
-func writeDoctorTTY(w io.Writer, report murli.DoctorReport) {
-	for _, c := range report.Checks {
-		var icon string
-		switch c.Status {
-		case "pass":
-			icon = "✓"
-		case "warn":
-			icon = "⚠"
-		case "fail":
-			icon = "✗"
-		default:
-			icon = "?"
-		}
-		if c.Message != "" {
-			fmt.Fprintf(w, "%s %s: %s\n", icon, c.Name, c.Message)
-		} else {
-			fmt.Fprintf(w, "%s %s\n", icon, c.Name)
-		}
-	}
-	fmt.Fprintf(w, "\n%d passed, %d warnings, %d failed\n",
-		report.Passed, report.Warnings, report.Failed)
-}
-
 func buildCobraDoctorCmd(rootCmd *gocobra.Command) *gocobra.Command {
 	return &gocobra.Command{
 		Use:   "doctor",
@@ -180,16 +156,19 @@ func buildCobraDoctorCmd(rootCmd *gocobra.Command) *gocobra.Command {
 
 			w := NewWriter(cmd)
 			if w.IsTTY() {
-				writeDoctorTTY(cmd.OutOrStdout(), report)
+				murli.WriteDoctorTTY(cmd.OutOrStdout(), report)
 				return nil
 			}
 			summary := "all checks passed"
 			if report.Failed > 0 {
 				summary = fmt.Sprintf("%d check(s) failed", report.Failed)
+				w.WritePlan(summary, report)
 			} else if report.Warnings > 0 {
 				summary = fmt.Sprintf("%d warning(s)", report.Warnings)
+				w.WriteSuccess(summary, report)
+			} else {
+				w.WriteSuccess(summary, report)
 			}
-			w.WriteSuccess(summary, report)
 			return nil
 		},
 	}

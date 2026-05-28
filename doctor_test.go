@@ -1,6 +1,7 @@
 package murli
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -82,6 +83,30 @@ func TestRunDoctor_MissingCommandMetadata(t *testing.T) {
 	}
 	if !found {
 		t.Error("RunDoctor must warn when commands are missing agent_description and summary")
+	}
+}
+
+func TestWriteDoctorTTY(t *testing.T) {
+	report := DoctorReport{}
+	report.add(CheckResult{Name: "schema_version", Status: "pass"})
+	report.add(CheckResult{Name: "output_formats", Status: "warn", Message: "formats reduced"})
+	report.add(CheckResult{Name: "command_metadata", Status: "fail", Message: "missing desc"})
+
+	var buf strings.Builder
+	WriteDoctorTTY(&buf, report)
+	got := buf.String()
+
+	if !strings.Contains(got, "✓ schema_version") {
+		t.Errorf("missing pass icon: %s", got)
+	}
+	if !strings.Contains(got, "⚠ output_formats: formats reduced") {
+		t.Errorf("missing warn icon: %s", got)
+	}
+	if !strings.Contains(got, "✗ command_metadata: missing desc") {
+		t.Errorf("missing fail icon: %s", got)
+	}
+	if !strings.Contains(got, "1 passed, 1 warnings, 1 failed") {
+		t.Errorf("missing summary: %s", got)
 	}
 }
 
