@@ -154,12 +154,78 @@ func Wrap(app *cli.Command) {
 
 mountProfile:
 	// Auto-mount profile subcommand group if not already present.
+	profileAlreadyMounted := false
 	for _, c := range app.Commands {
 		if c.Name == "profile" {
+			profileAlreadyMounted = true
+			break
+		}
+	}
+	if !profileAlreadyMounted {
+		app.Commands = append(app.Commands, buildV3ProfileGroup(app))
+	}
+
+	// Auto-mount doctor command if not already present.
+	for _, c := range app.Commands {
+		if c.Name == "doctor" {
 			return
 		}
 	}
-	app.Commands = append(app.Commands, buildV3ProfileGroup(app))
+	app.Commands = append(app.Commands, buildV3DoctorCmd(app))
+}
+
+// writeDoctorTTY writes a human-readable doctor report to w.
+func writeDoctorTTY(w io.Writer, report murli.DoctorReport) {
+	for _, c := range report.Checks {
+		var icon string
+		switch c.Status {
+		case "pass":
+			icon = "✓"
+		case "warn":
+			icon = "⚠"
+		case "fail":
+			icon = "✗"
+		default:
+			icon = "?"
+		}
+		if c.Message != "" {
+			fmt.Fprintf(w, "%s %s: %s\n", icon, c.Name, c.Message)
+		} else {
+			fmt.Fprintf(w, "%s %s\n", icon, c.Name)
+		}
+	}
+	fmt.Fprintf(w, "\n%d passed, %d warnings, %d failed\n",
+		report.Passed, report.Warnings, report.Failed)
+}
+
+func buildV3DoctorCmd(app *cli.Command) *cli.Command {
+	return &cli.Command{
+		Name:  "doctor",
+		Usage: "Run murli integration self-checks",
+		Action: func(ctx context.Context, c *cli.Command) error {
+			out := buildV3AppDescribeOutput(app)
+			report := murli.RunDoctor(out)
+
+			stdout := writerOrDefault(app.Writer, os.Stdout)
+			stderr := writerOrDefault(app.ErrWriter, os.Stderr)
+			// doctor has no --agent flag registered on it; access root's flag.
+			agentMode := c.Root().Bool("agent")
+			w := murli.NewWriter(stdout, stderr, agentMode)
+
+			if w.IsTTY() {
+				writeDoctorTTY(stdout, report)
+				return nil
+			}
+			summary := "all checks passed"
+			if report.Failed > 0 {
+				summary = fmt.Sprintf("%d check(s) failed", report.Failed)
+			} else if report.Warnings > 0 {
+				summary = fmt.Sprintf("%d warning(s)", report.Warnings)
+			}
+			w.WriteSuccess(summary, report)
+			return nil
+		},
+	}
 }
 
 func wrapCommands(cmds []*cli.Command, root *cli.Command) {

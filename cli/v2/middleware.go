@@ -129,12 +129,76 @@ func Wrap(app *cli.App) {
 	app.Commands = append(app.Commands, describeV2)
 
 	// Auto-mount profile subcommand group if not already present.
+	profileAlreadyMounted := false
 	for _, c := range app.Commands {
 		if c.Name == "profile" {
+			profileAlreadyMounted = true
+			break
+		}
+	}
+	if !profileAlreadyMounted {
+		app.Commands = append(app.Commands, buildV2ProfileGroup(app))
+	}
+
+	// Auto-mount doctor command if not already present.
+	for _, c := range app.Commands {
+		if c.Name == "doctor" {
 			return
 		}
 	}
-	app.Commands = append(app.Commands, buildV2ProfileGroup(app))
+	app.Commands = append(app.Commands, buildV2DoctorCmd(app))
+}
+
+// writeDoctorTTY writes a human-readable doctor report to w.
+func writeDoctorTTY(w io.Writer, report murli.DoctorReport) {
+	for _, c := range report.Checks {
+		var icon string
+		switch c.Status {
+		case "pass":
+			icon = "✓"
+		case "warn":
+			icon = "⚠"
+		case "fail":
+			icon = "✗"
+		default:
+			icon = "?"
+		}
+		if c.Message != "" {
+			fmt.Fprintf(w, "%s %s: %s\n", icon, c.Name, c.Message)
+		} else {
+			fmt.Fprintf(w, "%s %s\n", icon, c.Name)
+		}
+	}
+	fmt.Fprintf(w, "\n%d passed, %d warnings, %d failed\n",
+		report.Passed, report.Warnings, report.Failed)
+}
+
+func buildV2DoctorCmd(app *cli.App) *cli.Command {
+	return &cli.Command{
+		Name:  "doctor",
+		Usage: "Run murli integration self-checks",
+		Action: func(ctx *cli.Context) error {
+			out := buildV2AppDescribeOutput(app)
+			report := murli.RunDoctor(out)
+
+			stdout := writerOrDefault(ctx.App.Writer, os.Stdout)
+			stderr := writerOrDefault(ctx.App.ErrWriter, os.Stderr)
+			w := murli.NewWriter(stdout, stderr, ctx.Bool("agent"))
+
+			if w.IsTTY() {
+				writeDoctorTTY(stdout, report)
+				return nil
+			}
+			summary := "all checks passed"
+			if report.Failed > 0 {
+				summary = fmt.Sprintf("%d check(s) failed", report.Failed)
+			} else if report.Warnings > 0 {
+				summary = fmt.Sprintf("%d warning(s)", report.Warnings)
+			}
+			w.WriteSuccess(summary, report)
+			return nil
+		},
+	}
 }
 
 func wrapCommands(cmds []*cli.Command, app *cli.App) {
