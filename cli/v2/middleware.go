@@ -61,7 +61,7 @@ func buildV2AppDescribeOutput(app *cli.App) murli.DescribeOutput {
 		Profiles:      profilesInfo,
 	}
 	for _, cmd := range app.Commands {
-		if cmd.Hidden || cmd.Name == "describe" {
+		if cmd.Hidden || cmd.Name == "describe" || cmd.Name == "help" {
 			continue
 		}
 		out.Commands = append(out.Commands, BuildV2DescribeTree(cmd))
@@ -97,36 +97,40 @@ func Wrap(app *cli.App) {
 	}
 
 	// Auto-mount describe command if not already present.
+	describeAlreadyMounted := false
 	for _, c := range app.Commands {
 		if c.Name == "describe" {
-			return // already mounted
+			describeAlreadyMounted = true
+			break
 		}
 	}
-	describeV2 := &cli.Command{
-		Name:  "describe",
-		Usage: "Print the full command tree and capabilities as a single JSON document",
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "output", Usage: "Output format: json|ndjson|text"},
-			&cli.StringFlag{Name: "protocol-version", Usage: "Protocol version (0.2)"},
-			&cli.BoolFlag{Name: "agents-md", Usage: "Generate an AGENTS.md stub instead of JSON"},
-		},
-		Action: func(ctx *cli.Context) error {
-			out := buildV2AppDescribeOutput(app)
+	if !describeAlreadyMounted {
+		describeV2 := &cli.Command{
+			Name:  "describe",
+			Usage: "Print the full command tree and capabilities as a single JSON document",
+			Flags: []cli.Flag{
+				&cli.StringFlag{Name: "output", Usage: "Output format: json|ndjson|text"},
+				&cli.StringFlag{Name: "protocol-version", Usage: "Protocol version (0.2)"},
+				&cli.BoolFlag{Name: "agents-md", Usage: "Generate an AGENTS.md stub instead of JSON"},
+			},
+			Action: func(ctx *cli.Context) error {
+				out := buildV2AppDescribeOutput(app)
 
-			stdout := writerOrDefault(ctx.App.Writer, os.Stdout)
-			if ctx.Bool("agents-md") {
-				fmt.Fprint(stdout, murli.FormatAgentsMD(out))
+				stdout := writerOrDefault(ctx.App.Writer, os.Stdout)
+				if ctx.Bool("agents-md") {
+					fmt.Fprint(stdout, murli.FormatAgentsMD(out))
+					return nil
+				}
+
+				enc := json.NewEncoder(stdout)
+				enc.SetIndent("", "  ")
+				enc.SetEscapeHTML(false)
+				_ = enc.Encode(out)
 				return nil
-			}
-
-			enc := json.NewEncoder(stdout)
-			enc.SetIndent("", "  ")
-			enc.SetEscapeHTML(false)
-			_ = enc.Encode(out)
-			return nil
-		},
+			},
+		}
+		app.Commands = append(app.Commands, describeV2)
 	}
-	app.Commands = append(app.Commands, describeV2)
 
 	// Auto-mount profile subcommand group if not already present.
 	profileAlreadyMounted := false

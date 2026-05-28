@@ -38,17 +38,20 @@ func (s *Suite) Check(t *testing.T) {
 // murli DescribeOutput contract: schema_version, name, and capabilities are present.
 func (s *Suite) CheckDescribe(t *testing.T) {
 	t.Helper()
-	stdout, _, _ := s.run("describe")
+	stdout, stderr, exitCode := s.run("describe")
+	if exitCode != 0 {
+		t.Fatalf("describe exited %d\nstderr: %s\nstdout: %s", exitCode, stderr, stdout)
+	}
 
 	var got map[string]any
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("describe output is not valid JSON: %v\nraw: %s", err, stdout)
 	}
 
-	// schema_version must be present and non-empty.
+	// schema_version must be exactly "1.0".
 	sv, _ := got["schema_version"].(string)
-	if sv == "" {
-		t.Error("describe output must have schema_version")
+	if sv != "1.0" {
+		t.Errorf("describe output must have schema_version %q, got %q", "1.0", sv)
 	}
 
 	// name must be present.

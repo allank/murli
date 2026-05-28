@@ -61,7 +61,7 @@ func buildV3AppDescribeOutput(app *cli.Command) murli.DescribeOutput {
 		Profiles:      profilesInfo,
 	}
 	for _, cmd := range app.Commands {
-		if cmd.Hidden || cmd.Name == "describe" {
+		if cmd.Hidden || cmd.Name == "describe" || cmd.Name == "help" {
 			continue
 		}
 		out.Commands = append(out.Commands, BuildV3DescribeTree(cmd))

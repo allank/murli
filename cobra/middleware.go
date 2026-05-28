@@ -104,30 +104,33 @@ func Enable(rootCmd *gocobra.Command) {
 	// Auto-mount describe command if not already present.
 	for _, c := range rootCmd.Commands() {
 		if c.Name() == "describe" {
-			return // already mounted
+			goto mountProfile
 		}
 	}
-	describeCmd := &gocobra.Command{
-		Use:   "describe",
-		Short: "Print the full command tree and capabilities as a single JSON document",
-		RunE: func(cmd *gocobra.Command, args []string) error {
-			out := buildCobraDescribeOutput(rootCmd)
+	{
+		describeCmd := &gocobra.Command{
+			Use:   "describe",
+			Short: "Print the full command tree and capabilities as a single JSON document",
+			RunE: func(cmd *gocobra.Command, args []string) error {
+				out := buildCobraDescribeOutput(rootCmd)
 
-			if agentsMD, _ := cmd.Flags().GetBool("agents-md"); agentsMD {
-				fmt.Fprint(cmd.OutOrStdout(), murli.FormatAgentsMD(out))
+				if agentsMD, _ := cmd.Flags().GetBool("agents-md"); agentsMD {
+					fmt.Fprint(cmd.OutOrStdout(), murli.FormatAgentsMD(out))
+					return nil
+				}
+
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				enc.SetEscapeHTML(false)
+				_ = enc.Encode(out)
 				return nil
-			}
-
-			enc := json.NewEncoder(cmd.OutOrStdout())
-			enc.SetIndent("", "  ")
-			enc.SetEscapeHTML(false)
-			_ = enc.Encode(out)
-			return nil
-		},
+			},
+		}
+		describeCmd.Flags().Bool("agents-md", false, "Generate an AGENTS.md stub instead of JSON")
+		rootCmd.AddCommand(describeCmd)
 	}
-	describeCmd.Flags().Bool("agents-md", false, "Generate an AGENTS.md stub instead of JSON")
-	rootCmd.AddCommand(describeCmd)
 
+mountProfile:
 	// Auto-mount profile subcommand group if not already present.
 	for _, c := range rootCmd.Commands() {
 		if c.Name() == "profile" {
