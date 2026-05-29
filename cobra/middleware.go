@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"sort"
 	"strings"
 
@@ -83,13 +81,6 @@ func Enable(rootCmd *gocobra.Command) {
 	if rootCmd.PersistentFlags().Lookup("profile") == nil {
 		rootCmd.PersistentFlags().String("profile", "", "Profile name to use for this invocation")
 	}
-	// Naming convention advisory: emit warnings in TTY mode only (developer feedback).
-	if isTTYWriter(rootCmd.OutOrStdout()) {
-		var cmdNames, flagNames []string
-		collectNames(rootCmd, &cmdNames, &flagNames)
-		murli.CheckConventions(cmdNames, flagNames, rootCmd.ErrOrStderr())
-	}
-
 	// Guard against double-wrapping on repeated Enable() calls.
 	if rootCmd.Annotations == nil {
 		rootCmd.Annotations = make(map[string]string)
@@ -132,49 +123,17 @@ func Enable(rootCmd *gocobra.Command) {
 
 mountProfile:
 	// Auto-mount profile subcommand group if not already present.
+	profileMounted := false
 	for _, c := range rootCmd.Commands() {
 		if c.Name() == "profile" {
-			goto mountDoctor
+			profileMounted = true
+			break
 		}
 	}
-	rootCmd.AddCommand(buildCobraProfileGroup(rootCmd))
-
-mountDoctor:
-	// Auto-mount doctor command if not already present.
-	for _, c := range rootCmd.Commands() {
-		if c.Name() == "doctor" {
-			return
-		}
+	if !profileMounted {
+		rootCmd.AddCommand(buildCobraProfileGroup(rootCmd))
 	}
-	rootCmd.AddCommand(buildCobraDoctorCmd(rootCmd))
-}
-
-func buildCobraDoctorCmd(rootCmd *gocobra.Command) *gocobra.Command {
-	return &gocobra.Command{
-		Use:   "doctor",
-		Short: "Run murli integration self-checks",
-		RunE: func(cmd *gocobra.Command, args []string) error {
-			out := buildCobraDescribeOutput(rootCmd)
-			report := murli.RunDoctor(out)
-
-			w := NewWriter(cmd)
-			if w.IsTTY() {
-				murli.WriteDoctorTTY(cmd.OutOrStdout(), report)
-				return nil
-			}
-			summary := "all checks passed"
-			if report.Failed > 0 {
-				summary = fmt.Sprintf("%d check(s) failed", report.Failed)
-				w.WritePlan(summary, report)
-			} else if report.Warnings > 0 {
-				summary = fmt.Sprintf("%d warning(s)", report.Warnings)
-				w.WriteSuccess(summary, report)
-			} else {
-				w.WriteSuccess(summary, report)
-			}
-			return nil
-		},
-	}
+	mountDevTools(rootCmd)
 }
 
 func wrapCommands(cmd *gocobra.Command) {
@@ -339,25 +298,6 @@ func wrapCommands(cmd *gocobra.Command) {
 	}
 }
 
-// isTTYWriter reports whether w is a character device (TTY).
-func isTTYWriter(w io.Writer) bool {
-	if f, ok := w.(*os.File); ok {
-		stat, _ := f.Stat()
-		return stat != nil && (stat.Mode()&os.ModeCharDevice) != 0
-	}
-	return false
-}
-
-// collectNames gathers all command names and flag names recursively from cmd.
-func collectNames(cmd *gocobra.Command, cmds, flags *[]string) {
-	*cmds = append(*cmds, cmd.Name())
-	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		*flags = append(*flags, f.Name)
-	})
-	for _, child := range cmd.Commands() {
-		collectNames(child, cmds, flags)
-	}
-}
 
 // cobraMetadata extracts murli.Metadata from a command's annotations map.
 func cobraMetadata(cmd *gocobra.Command) murli.Metadata {
