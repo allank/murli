@@ -52,7 +52,7 @@ _ = murliCobra.Execute(rootCmd)   // replaces rootCmd.Execute()
 _ = murliCLI.Run(app, os.Args)   // replaces app.Run(os.Args)
 ```
 
-That single change gives your tool structured JSON output, `--schema` on every command, a `describe` subcommand, a `doctor` subcommand, a `profile` subcommand group, and automatic error handling. Everything below layers on top.
+That single change gives your tool structured JSON output, `--schema` on every command, a `describe` subcommand, a `profile` subcommand group, and automatic error handling. Everything below layers on top.
 
 ---
 
@@ -202,9 +202,16 @@ Positional argument validation is automatically bypassed when generating schemas
 
 ---
 
-**Zero effort — `doctor` is auto-mounted.**
+**Development only — `doctor` requires `-tags murlidev`.**
 
-`doctor` runs built-in self-checks and reports whether your murli integration is correctly configured. Agents can call it to verify the tool before use.
+`doctor` runs built-in self-checks and reports whether your murli integration is correctly configured. It is a developer tool, not an agent-facing command: in release builds it is stripped so it never appears in `describe` output or pollutes the command surface agents see.
+
+Build with `-tags murlidev` during development to enable it:
+
+```bash
+go build -tags murlidev ./...
+go test  -tags murlidev ./...
+```
 
 ```bash
 $ ./riffle doctor --agent
@@ -221,7 +228,7 @@ $ ./riffle doctor --agent
 }
 ```
 
-`status` is `"ok"` when all checks pass or only warnings exist. `status` is `"plan"` when any check fails — signalling the tool needs attention before use.
+`status` is `"ok"` when all checks pass or only warnings exist. `status` is `"plan"` when any check fails — signalling the tool needs attention before release.
 
 ---
 
@@ -335,16 +342,16 @@ murliCobra.Annotate(queryCmd, murli.Metadata{
 
 ---
 
-**Naming convention advisory.**
+**Naming convention advisory — requires `-tags murlidev`.**
 
-In TTY mode murli emits advisory warnings to stderr when command or flag names deviate from conventional vocabulary:
+When built with `-tags murlidev`, murli emits advisory warnings to stderr in TTY mode when command or flag names deviate from conventional vocabulary:
 
 ```
 [murli advisory] command "fetch": prefer "get" (conventional vocabulary)
 [murli advisory] flag --format: prefer --output (conventional vocabulary)
 ```
 
-Warnings are informational only — they never block execution and are suppressed entirely in agent mode. Common advisories: `get` over `fetch`; `list` over `ls`; `delete` over `remove`; `--output` over `--format`.
+Warnings are informational only — they never block execution and are suppressed entirely in agent mode. Common advisories: `get` over `fetch`; `list` over `ls`; `delete` over `remove`; `--output` over `--format`. Like `doctor`, this is a developer aid stripped from release builds.
 
 ---
 
@@ -708,7 +715,8 @@ func TestConformance(t *testing.T) {
 ## Testing
 
 ```bash
-go test -race ./...
+go test -race ./...                    # release surface (no doctor, no convention checks)
+go test -race -tags murlidev ./...     # development surface (doctor command enabled)
 ```
 
 ---
