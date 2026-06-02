@@ -5,7 +5,7 @@ package cli_test
 import (
 	"testing"
 
-	murliCLI "github.com/allank/murli/cli/v2"
+	murliCLI "github.com/murli-cli/murli-go/cli/v2"
 	"github.com/urfave/cli/v2"
 )
 

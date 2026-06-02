@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/allank/murli/conformance"
+	"github.com/murli-cli/murli-go/conformance"
 )
 
 // TestConformanceSuiteAgainstDemo builds the demo binary and runs conformance checks.
@@ -19,7 +19,7 @@ func TestConformanceSuiteAgainstDemo(t *testing.T) {
 func buildDemoBinary(t *testing.T) string {
 	t.Helper()
 	binaryPath := filepath.Join(t.TempDir(), "riffle")
-	cmd := exec.Command("go", "build", "-o", binaryPath, "github.com/allank/murli/demo")
+	cmd := exec.Command("go", "build", "-o", binaryPath, "github.com/murli-cli/murli-go/demo")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("build demo binary: %v\n%s", err, out)

@@ -1,4 +1,4 @@
-module github.com/allank/murli
+module github.com/murli-cli/murli-go
 
 go 1.26.2
 

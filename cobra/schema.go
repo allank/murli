@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/allank/murli"
+	"github.com/murli-cli/murli-go"
 	gocobra "github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

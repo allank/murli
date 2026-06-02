@@ -11,5 +11,5 @@ const SchemaVersion = "1.0"
 //
 // Or inject directly at build time:
 //
-//	-ldflags "-X github.com/allank/murli.ToolVersion=1.2.3"
+//	-ldflags "-X github.com/murli-cli/murli-go.ToolVersion=1.2.3"
 var ToolVersion = ""

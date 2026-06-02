@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/allank/murli"
-	murliCLI "github.com/allank/murli/cli/v2"
+	"github.com/murli-cli/murli-go"
+	murliCLI "github.com/murli-cli/murli-go/cli/v2"
 	"github.com/urfave/cli/v2"
 )
 

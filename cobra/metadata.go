@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/allank/murli"
+	"github.com/murli-cli/murli-go"
 	"github.com/spf13/cobra"
 )
 

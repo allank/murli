@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/allank/murli"
+	"github.com/murli-cli/murli-go"
 )
 
 func TestLoadProfileStoreReturnsEmptyWhenMissing(t *testing.T) {

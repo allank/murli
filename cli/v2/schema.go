@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/allank/murli"
+	"github.com/murli-cli/murli-go"
 	"github.com/urfave/cli/v2"
 )
 

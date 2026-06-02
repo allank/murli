@@ -5,7 +5,7 @@ package cobra_test
 import (
 	"testing"
 
-	murliCobra "github.com/allank/murli/cobra"
+	murliCobra "github.com/murli-cli/murli-go/cobra"
 	"github.com/spf13/cobra"
 )
 

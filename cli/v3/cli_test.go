@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/allank/murli"
-	murliCLI "github.com/allank/murli/cli/v3"
+	"github.com/murli-cli/murli-go"
+	murliCLI "github.com/murli-cli/murli-go/cli/v3"
 	"github.com/urfave/cli/v3"
 )
 
