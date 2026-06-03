@@ -1,7 +1,7 @@
 # murli 🎶
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/allank/murli.svg)](https://pkg.go.dev/github.com/allank/murli)
-[![Go Report Card](https://goreportcard.com/badge/github.com/allank/murli)](https://goreportcard.com/report/github.com/allank/murli)
+[![Go Reference](https://pkg.go.dev/badge/github.com/murli-cli/murli-go.svg)](https://pkg.go.dev/github.com/murli-cli/murli-go)
+[![Go Report Card](https://goreportcard.com/badge/github.com/murli-cli/murli-go)](https://goreportcard.com/report/github.com/murli-cli/murli-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A pure-Go middleware for CLI tools that makes them speak natively to AI agents — with adapters for [spf13/cobra](https://github.com/spf13/cobra), [urfave/cli v2](https://github.com/urfave/cli/tree/main/docs/v2), and [urfave/cli v3](https://github.com/urfave/cli).
@@ -30,12 +30,12 @@ Five principles guide everything murli does:
 
 ```bash
 # Core types (Writer, Logger, AgentError, Metadata)
-go get github.com/allank/murli
+go get github.com/murli-cli/murli-go
 
 # Pick one adapter for your CLI framework:
-go get github.com/allank/murli/cobra     # spf13/cobra
-go get github.com/allank/murli/cli/v2   # urfave/cli v2
-go get github.com/allank/murli/cli/v3   # urfave/cli v3
+go get github.com/murli-cli/murli-go/cobra     # spf13/cobra
+go get github.com/murli-cli/murli-go/cli/v2   # urfave/cli v2
+go get github.com/murli-cli/murli-go/cli/v3   # urfave/cli v3
 ```
 
 ---
@@ -680,11 +680,11 @@ ANSI escape codes in log messages are automatically stripped in agent mode, keep
 
 | Package | Import path | Use when |
 |---|---|---|
-| Core | `github.com/allank/murli` | Always — `Writer`, `Logger`, `AgentError`, `Metadata`, schema types |
-| cobra adapter | `github.com/allank/murli/cobra` | Your CLI uses [spf13/cobra](https://github.com/spf13/cobra) |
-| cli/v2 adapter | `github.com/allank/murli/cli/v2` | Your CLI uses [urfave/cli v2](https://github.com/urfave/cli/tree/main/docs/v2) |
-| cli/v3 adapter | `github.com/allank/murli/cli/v3` | Your CLI uses [urfave/cli v3](https://github.com/urfave/cli) |
-| conformance | `github.com/allank/murli/conformance` | Verify your murli integration satisfies the 1.0 contract in CI |
+| Core | `github.com/murli-cli/murli-go` | Always — `Writer`, `Logger`, `AgentError`, `Metadata`, schema types |
+| cobra adapter | `github.com/murli-cli/murli-go/cobra` | Your CLI uses [spf13/cobra](https://github.com/spf13/cobra) |
+| cli/v2 adapter | `github.com/murli-cli/murli-go/cli/v2` | Your CLI uses [urfave/cli v2](https://github.com/urfave/cli/tree/main/docs/v2) |
+| cli/v3 adapter | `github.com/murli-cli/murli-go/cli/v3` | Your CLI uses [urfave/cli v3](https://github.com/urfave/cli) |
+| conformance | `github.com/murli-cli/murli-go/conformance` | Verify your murli integration satisfies the 1.0 contract in CI |
 
 Each adapter exposes the same surface:
 
